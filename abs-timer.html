@@ -1,0 +1,1267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+  <title>Abs Timer</title>
+  <!-- Home-screen / PWA-ish behavior -->
+  <meta name="theme-color" content="#0F1520" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Abs Timer" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%231D4ED8'/%3E%3Ctext x='50' y='68' font-size='52' text-anchor='middle'%3E%F0%9F%92%AA%3C/text%3E%3C/svg%3E" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <style>
+    html, body { margin: 0; padding: 0; background: #0F1520; }
+    #root { min-height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" data-presets="react">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+// ---- Exercise library ----
+const LIBRARY = [
+  { id: "plank", name: "Plank", duration: 60, cue: "Elbows under shoulders · squeeze glutes · hips level" },
+  { id: "bicycle", name: "Bicycle Crunches", duration: 40, cue: "Slow & controlled · elbow to opposite knee" },
+  { id: "legraise", name: "Leg Raises", duration: 40, cue: "Lower slowly · lower back pressed to floor" },
+  { id: "mtclimber", name: "Mountain Climbers", duration: 40, cue: "Fast pace · drive knees to chest" },
+  { id: "russian", name: "Russian Twists", duration: 40, cue: "Feet up if you can · rotate fully side to side" },
+  { id: "hollow", name: "Hollow Hold", duration: 40, cue: "Arms & legs extended · lower back glued to floor" },
+  { id: "vups", name: "V-Ups", duration: 40, cue: "Reach hands to toes · keep legs straight" },
+  { id: "sideplankL", name: "Side Plank (Left)", duration: 30, cue: "Stack shoulders & hips · don't let hips drop" },
+  { id: "sideplankR", name: "Side Plank (Right)", duration: 30, cue: "Stack shoulders & hips · don't let hips drop" },
+  { id: "flutter", name: "Flutter Kicks", duration: 40, cue: "Small quick kicks · hands under hips for support" },
+  { id: "deadbug", name: "Dead Bug", duration: 40, cue: "Opposite arm & leg · slow · core braced" },
+  { id: "revcrunch", name: "Reverse Crunches", duration: 40, cue: "Lift hips off floor · control on the way down" },
+  { id: "crunches", name: "Crunches", duration: 40, cue: "Chin off chest · lift with abs, not neck" },
+  { id: "heeltaps", name: "Heel Taps", duration: 40, cue: "Shoulders slightly up · reach side to side" },
+  { id: "toetouch", name: "Toe Touches", duration: 40, cue: "Legs vertical · reach up toward toes" },
+];
+const byId = (id) => LIBRARY.find((e) => e.id === id);
+
+// ---- Built-in presets ----
+const BUILTIN_PRESETS = [
+  {
+    id: "classic",
+    name: "Classic Circuit",
+    exercises: ["plank", "bicycle", "legraise", "mtclimber", "russian"],
+    rest: 20,
+    roundRest: 75,
+    rounds: 3,
+  },
+  {
+    id: "burner",
+    name: "Core Burner",
+    exercises: ["hollow", "vups", "sideplankL", "sideplankR", "flutter", "plank"],
+    rest: 15,
+    roundRest: 90,
+    rounds: 3,
+  },
+  {
+    id: "quick",
+    name: "Quick Hit",
+    exercises: ["deadbug", "crunches", "heeltaps", "revcrunch"],
+    rest: 20,
+    roundRest: 60,
+    rounds: 2,
+  },
+];
+
+const GET_READY = 10;
+const STORAGE_KEY = "abs-timer-custom-presets";
+const ROW_H = 56; // fixed row height for drag math
+
+// ---- Persistence adapter ----
+// Uses Claude's artifact storage when available (persists across sessions on
+// claude.ai). If the app is exported and hosted as a standalone site, it
+// falls back to the browser's localStorage instead.
+const store = {
+  async get(key) {
+    if (typeof window !== "undefined" && window.storage) {
+      try {
+        const r = await window.storage.get(key);
+        return r && r.value != null ? r.value : null;
+      } catch (e) {
+        return null; // key doesn't exist yet
+      }
+    }
+    try {
+      return window.localStorage.getItem(key);
+    } catch (e) {
+      return null;
+    }
+  },
+  async set(key, value) {
+    if (typeof window !== "undefined" && window.storage) {
+      try {
+        await window.storage.set(key, value);
+        return true;
+      } catch (e) {
+        /* fall through to localStorage */
+      }
+    }
+    try {
+      window.localStorage.setItem(key, value);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  },
+};
+
+let uidCounter = 1;
+const withUids = (ids) => ids.map((exId) => ({ uid: `u${uidCounter++}`, exId }));
+
+// ---- Phase colors ----
+const THEME = {
+  ready: { bg: "#1B2432", accent: "#8FA3BF", label: "GET READY" },
+  work: { bg: "#1D4ED8", accent: "#BFDBFE", label: "WORK" },
+  rest: { bg: "#047857", accent: "#A7F3D0", label: "REST" },
+  roundRest: { bg: "#92400E", accent: "#FDE68A", label: "ROUND BREAK" },
+  done: { bg: "#111827", accent: "#FDE68A", label: "DONE" },
+};
+
+function AbsWorkoutTimer() {
+  // ---- Setup flow: home (pick preset) → preview → edit ----
+  const [setupView, setSetupView] = useState("home");
+  const [workout, setWorkout] = useState(() => withUids(BUILTIN_PRESETS[0].exercises));
+  const [restBetween, setRestBetween] = useState(BUILTIN_PRESETS[0].rest);
+  const [roundRest, setRoundRest] = useState(BUILTIN_PRESETS[0].roundRest);
+  const [totalRounds, setTotalRounds] = useState(BUILTIN_PRESETS[0].rounds);
+  const [selectedId, setSelectedId] = useState("classic");
+  const [selectedName, setSelectedName] = useState(BUILTIN_PRESETS[0].name);
+  const [edited, setEdited] = useState(false);
+  const [customPresets, setCustomPresets] = useState([]);
+  const [presetName, setPresetName] = useState("");
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [saveMsg, setSaveMsg] = useState("");
+
+  // ---- Drag state (commit on drop) ----
+  const [dragIndex, setDragIndex] = useState(null);
+  const [dragOffset, setDragOffset] = useState(0);
+  const dragRef = useRef({ index: null, startY: 0, offset: 0, moved: false });
+
+  // ---- Timer state ----
+  const [phase, setPhase] = useState("idle");
+  const [round, setRound] = useState(1);
+  const [exIndex, setExIndex] = useState(0);
+  const [timeLeft, setTimeLeft] = useState(GET_READY);
+  const [running, setRunning] = useState(false);
+  const [soundOn, setSoundOn] = useState(true);
+
+  const audioCtxRef = useRef(null);
+  const wakeLockRef = useRef(null);
+
+  const exercises = workout
+    .map((w) => {
+      const ex = byId(w.exId);
+      return ex ? { ...ex, uid: w.uid } : null;
+    })
+    .filter(Boolean);
+
+  const isCustomSelected = customPresets.some((p) => p.id === selectedId);
+
+  // ---- Load saved presets ----
+  useEffect(() => {
+    (async () => {
+      try {
+        const value = await store.get(STORAGE_KEY);
+        if (value) setCustomPresets(JSON.parse(value));
+      } catch (e) {
+        /* no saved presets yet */
+      }
+    })();
+  }, []);
+
+  const persistPresets = async (presets) => {
+    await store.set(STORAGE_KEY, JSON.stringify(presets));
+  };
+
+  // ---- Preset / builder actions ----
+  const choosePreset = (p) => {
+    setWorkout(withUids(p.exercises));
+    setRestBetween(p.rest);
+    setRoundRest(p.roundRest);
+    setTotalRounds(p.rounds);
+    setSelectedId(p.id);
+    setSelectedName(p.name);
+    setEdited(false);
+    setSetupView("preview");
+  };
+
+  const removeExercise = (uid) => {
+    setWorkout((w) => w.filter((item) => item.uid !== uid));
+    setEdited(true);
+  };
+
+  const addExercise = (id) => {
+    setWorkout((w) => [...w, { uid: `u${uidCounter++}`, exId: id }]);
+    setEdited(true);
+  };
+
+  const currentConfig = () => ({
+    exercises: workout.map((w) => w.exId),
+    rest: restBetween,
+    roundRest,
+    rounds: totalRounds,
+  });
+
+  const updateExistingPreset = async () => {
+    const next = customPresets.map((p) =>
+      p.id === selectedId ? { ...p, ...currentConfig() } : p
+    );
+    setCustomPresets(next);
+    await persistPresets(next);
+    setEdited(false);
+    setSaveMsg(`Updated "${selectedName}"`);
+    setTimeout(() => setSaveMsg(""), 2500);
+  };
+
+  const saveAsNewPreset = async () => {
+    const name = presetName.trim();
+    if (!name || workout.length === 0) return;
+    const preset = {
+      id: `custom-${Date.now()}`,
+      name,
+      ...currentConfig(),
+      custom: true,
+    };
+    const next = [...customPresets, preset];
+    setCustomPresets(next);
+    await persistPresets(next);
+    setSelectedId(preset.id);
+    setSelectedName(name);
+    setEdited(false);
+    setPresetName("");
+    setSaveMsg(`Saved "${name}"`);
+    setTimeout(() => setSaveMsg(""), 2500);
+  };
+
+  const deletePreset = async (id) => {
+    const next = customPresets.filter((p) => p.id !== id);
+    setCustomPresets(next);
+    await persistPresets(next);
+  };
+
+  // ---- Drag to reorder: visual shift while dragging, commit once on drop ----
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const dragTarget =
+    dragIndex === null
+      ? null
+      : clamp(dragIndex + Math.round(dragOffset / ROW_H), 0, workout.length - 1);
+
+  const onDragMove = useCallback((e) => {
+    const d = dragRef.current;
+    if (d.index === null) return;
+    e.preventDefault();
+    d.offset = e.clientY - d.startY;
+    if (Math.abs(d.offset) > 4) d.moved = true;
+    setDragOffset(d.offset);
+  }, []);
+
+  const onDragEnd = useCallback(() => {
+    const d = dragRef.current;
+    if (d.index !== null) {
+      setWorkout((w) => {
+        const from = d.index;
+        const to = clamp(from + Math.round(d.offset / ROW_H), 0, w.length - 1);
+        if (from === to) return w;
+        const next = [...w];
+        const [item] = next.splice(from, 1);
+        next.splice(to, 0, item);
+        return next;
+      });
+      if (d.moved) setEdited(true);
+    }
+    dragRef.current = { index: null, startY: 0, offset: 0, moved: false };
+    setDragIndex(null);
+    setDragOffset(0);
+    window.removeEventListener("pointermove", onDragMove);
+    window.removeEventListener("pointerup", onDragEnd);
+    window.removeEventListener("pointercancel", onDragEnd);
+  }, [onDragMove]);
+
+  const onDragStart = (e, i) => {
+    e.preventDefault();
+    dragRef.current = { index: i, startY: e.clientY, offset: 0, moved: false };
+    setDragIndex(i);
+    setDragOffset(0);
+    window.addEventListener("pointermove", onDragMove, { passive: false });
+    window.addEventListener("pointerup", onDragEnd);
+    window.addEventListener("pointercancel", onDragEnd);
+  };
+
+  useEffect(() => {
+    return () => {
+      window.removeEventListener("pointermove", onDragMove);
+      window.removeEventListener("pointerup", onDragEnd);
+      window.removeEventListener("pointercancel", onDragEnd);
+    };
+  }, [onDragMove, onDragEnd]);
+
+  // Compute the visual shift of a non-dragged row while a drag is active
+  const rowShift = (i) => {
+    if (dragIndex === null || dragTarget === null || i === dragIndex) return 0;
+    if (dragIndex < dragTarget && i > dragIndex && i <= dragTarget) return -ROW_H;
+    if (dragIndex > dragTarget && i >= dragTarget && i < dragIndex) return ROW_H;
+    return 0;
+  };
+
+  // ---- Audio beeps ----
+  const beep = useCallback(
+    (freq = 880, ms = 120) => {
+      if (!soundOn) return;
+      try {
+        if (!audioCtxRef.current) {
+          audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        const ctx = audioCtxRef.current;
+        if (ctx.state === "suspended") ctx.resume();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.frequency.value = freq;
+        osc.type = "sine";
+        gain.gain.setValueAtTime(0.25, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + ms / 1000);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + ms / 1000);
+      } catch (e) {
+        /* audio unavailable */
+      }
+    },
+    [soundOn]
+  );
+
+  // ---- Keep screen awake while running (best-effort) ----
+  useEffect(() => {
+    const requestWakeLock = async () => {
+      try {
+        if (running && "wakeLock" in navigator) {
+          wakeLockRef.current = await navigator.wakeLock.request("screen");
+        }
+      } catch (e) {
+        /* not supported / denied */
+      }
+    };
+    if (running) requestWakeLock();
+    return () => {
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => {});
+        wakeLockRef.current = null;
+      }
+    };
+  }, [running]);
+
+  // ---- Phase transition logic ----
+  const advance = useCallback(() => {
+    if (phase === "ready") {
+      setPhase("work");
+      setTimeLeft(exercises[0].duration);
+      beep(1200, 300);
+      return;
+    }
+    if (phase === "work") {
+      const isLastExercise = exIndex === exercises.length - 1;
+      const isLastRound = round === totalRounds;
+      if (isLastExercise && isLastRound) {
+        setPhase("done");
+        setRunning(false);
+        beep(1400, 500);
+        return;
+      }
+      if (isLastExercise) {
+        setPhase("roundRest");
+        setTimeLeft(roundRest);
+        beep(600, 250);
+        return;
+      }
+      setPhase("rest");
+      setTimeLeft(restBetween);
+      beep(600, 250);
+      return;
+    }
+    if (phase === "rest") {
+      const next = exIndex + 1;
+      setExIndex(next);
+      setPhase("work");
+      setTimeLeft(exercises[next].duration);
+      beep(1200, 300);
+      return;
+    }
+    if (phase === "roundRest") {
+      setRound((r) => r + 1);
+      setExIndex(0);
+      setPhase("work");
+      setTimeLeft(exercises[0].duration);
+      beep(1200, 300);
+    }
+  }, [phase, exIndex, round, totalRounds, restBetween, roundRest, exercises, beep]);
+
+  // ---- Tick ----
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => {
+      setTimeLeft((t) => {
+        if (t <= 1) return 0;
+        if (t <= 4) beep(880, 100);
+        return t - 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [running, beep]);
+
+  useEffect(() => {
+    if (running && timeLeft === 0 && phase !== "done" && phase !== "idle") {
+      advance();
+    }
+  }, [timeLeft, running, phase, advance]);
+
+  // ---- Controls ----
+  const start = () => {
+    if (exercises.length === 0) return;
+    setPhase("ready");
+    setRound(1);
+    setExIndex(0);
+    setTimeLeft(GET_READY);
+    setRunning(true);
+    beep(880, 150);
+  };
+  const togglePause = () => setRunning((r) => !r);
+  const skip = () => setTimeLeft(0);
+  const reset = () => {
+    setRunning(false);
+    setPhase("idle");
+    setRound(1);
+    setExIndex(0);
+    setTimeLeft(GET_READY);
+  };
+  const goBack = () => {
+    if (phase === "ready") {
+      setTimeLeft(GET_READY);
+      return;
+    }
+    if (phase === "rest") {
+      setPhase("work");
+      setTimeLeft(exercises[exIndex].duration);
+      return;
+    }
+    if (phase === "roundRest") {
+      const last = exercises.length - 1;
+      setExIndex(last);
+      setPhase("work");
+      setTimeLeft(exercises[last].duration);
+      return;
+    }
+    if (phase === "work") {
+      if (exIndex > 0) {
+        const prev = exIndex - 1;
+        setExIndex(prev);
+        setTimeLeft(exercises[prev].duration);
+      } else if (round > 1) {
+        const last = exercises.length - 1;
+        setRound((r) => r - 1);
+        setExIndex(last);
+        setTimeLeft(exercises[last].duration);
+      } else {
+        setTimeLeft(exercises[0].duration);
+      }
+    }
+  };
+
+  // ---- Derived display values ----
+  const theme = THEME[phase] || THEME.ready;
+  const currentEx = exercises[exIndex];
+  const nextEx =
+    phase === "ready"
+      ? exercises[0]
+      : phase === "rest"
+      ? exercises[exIndex + 1]
+      : phase === "roundRest"
+      ? exercises[0]
+      : phase === "work" && exIndex < exercises.length - 1
+      ? exercises[exIndex + 1]
+      : null;
+
+  const phaseTotal =
+    phase === "ready"
+      ? GET_READY
+      : phase === "work"
+      ? currentEx.duration
+      : phase === "rest"
+      ? restBetween
+      : phase === "roundRest"
+      ? roundRest
+      : 1;
+  const progress = 1 - timeLeft / phaseTotal;
+
+  const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+  const totalWorkoutSecs =
+    GET_READY +
+    totalRounds * exercises.reduce((a, e) => a + e.duration, 0) +
+    totalRounds * Math.max(0, exercises.length - 1) * restBetween +
+    (totalRounds - 1) * roundRest;
+  const totalMins = Math.max(1, Math.round(totalWorkoutSecs / 60));
+
+  const allPresets = [...BUILTIN_PRESETS, ...customPresets];
+
+  // ================= HOME: PICK A PRESET =================
+  if (phase === "idle" && setupView === "home") {
+    return (
+      <div style={{ ...styles.screen, background: "#0F1520" }}>
+        <div style={styles.setupWrap}>
+          <div style={styles.eyebrow}>ABS CIRCUIT</div>
+          <h1 style={styles.setupTitle}>Pick your workout.</h1>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {allPresets.map((p) => {
+              const exs = p.exercises.map(byId).filter(Boolean);
+              const mins = Math.max(
+                1,
+                Math.round(
+                  (GET_READY +
+                    p.rounds * exs.reduce((a, e) => a + e.duration, 0) +
+                    p.rounds * Math.max(0, exs.length - 1) * p.rest +
+                    (p.rounds - 1) * p.roundRest) /
+                    60
+                )
+              );
+              return (
+                <div key={p.id} style={styles.presetCard} onClick={() => choosePreset(p)}>
+                  <div style={{ flex: 1 }}>
+                    <div style={styles.presetCardName}>
+                      {p.name}
+                      {p.custom && <span style={styles.customBadge}>YOURS</span>}
+                    </div>
+                    <div style={styles.presetCardMeta}>
+                      {exs.length} exercises · {p.rounds} rounds · ~{mins} min
+                    </div>
+                  </div>
+                  {p.custom && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deletePreset(p.id);
+                      }}
+                      style={styles.cardDelete}
+                      aria-label={`Delete preset ${p.name}`}
+                    >
+                      ×
+                    </button>
+                  )}
+                  <span style={styles.presetArrow}>›</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ================= PREVIEW: PRESET DETAILS + START =================
+  if (phase === "idle" && setupView === "preview") {
+    return (
+      <div style={{ ...styles.screen, background: "#0F1520" }}>
+        <div style={styles.setupWrap}>
+          <button onClick={() => setSetupView("home")} style={styles.backLink}>
+            ‹ All workouts
+          </button>
+          <h1 style={{ ...styles.setupTitle, marginBottom: 6 }}>
+            {selectedName}
+            {edited && <span style={styles.editedTag}> · edited</span>}
+          </h1>
+          <div style={styles.previewMeta}>
+            {exercises.length} exercises · {totalRounds} rounds · ~{totalMins} min
+          </div>
+
+          <div style={{ ...styles.exList, marginTop: 20 }}>
+            {exercises.map((ex, i) => (
+              <div key={ex.uid} style={styles.previewRow}>
+                <span style={styles.previewIndex}>{i + 1}</span>
+                <span style={styles.exName}>{ex.name}</span>
+                <span style={styles.exDur}>{ex.duration}s</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={styles.previewTiming}>
+            <div style={styles.timingItem}>
+              <span style={styles.timingValue}>{restBetween}s</span>
+              <span style={styles.timingLabel}>rest between exercises</span>
+            </div>
+            <div style={styles.timingItem}>
+              <span style={styles.timingValue}>{roundRest}s</span>
+              <span style={styles.timingLabel}>rest between rounds</span>
+            </div>
+            <div style={styles.timingItem}>
+              <span style={styles.timingValue}>{totalRounds}</span>
+              <span style={styles.timingLabel}>rounds</span>
+            </div>
+          </div>
+
+          <button onClick={start} style={styles.startBtn}>
+            START WORKOUT
+          </button>
+          <button onClick={() => setSetupView("edit")} style={styles.editBtn}>
+            Edit workout
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ================= EDIT MODE: BUILDER WITH DRAG REORDER =================
+  if (phase === "idle" && setupView === "edit") {
+    return (
+      <div style={{ ...styles.screen, background: "#0F1520" }}>
+        <div style={styles.setupWrap}>
+          <button onClick={() => setSetupView("preview")} style={styles.backLink}>
+            ‹ Done editing
+          </button>
+          <h1 style={{ ...styles.setupTitle, marginBottom: 6 }}>Edit workout</h1>
+          <div style={styles.previewMeta}>Hold ⠿ and drag to reorder · tap × to remove</div>
+
+          <div style={styles.sectionLabel}>EXERCISES</div>
+          <div style={styles.exList}>
+            {exercises.length === 0 && (
+              <div style={{ padding: "16px 0", color: "#8FA3BF", fontSize: 15 }}>
+                No exercises yet — add some below.
+              </div>
+            )}
+            {exercises.map((ex, i) => {
+              const isDragging = dragIndex === i;
+              const shift = rowShift(i);
+              return (
+                <div
+                  key={ex.uid}
+                  style={{
+                    ...styles.exRow,
+                    height: ROW_H,
+                    boxSizing: "border-box",
+                    transform: isDragging
+                      ? `translateY(${dragOffset}px) scale(1.02)`
+                      : `translateY(${shift}px)`,
+                    transition: isDragging ? "none" : "transform 0.18s ease",
+                    background: isDragging ? "#1E2C48" : "transparent",
+                    boxShadow: isDragging ? "0 8px 24px rgba(0,0,0,0.55)" : "none",
+                    borderRadius: isDragging ? 12 : 0,
+                    borderBottom: isDragging ? "1px solid transparent" : "1px solid #26324A",
+                    position: "relative",
+                    zIndex: isDragging ? 10 : 1,
+                  }}
+                >
+                  <div
+                    onPointerDown={(e) => onDragStart(e, i)}
+                    style={styles.dragHandle}
+                    aria-label={`Drag to reorder ${ex.name}`}
+                  >
+                    ⠿
+                  </div>
+                  <span style={styles.exName}>{ex.name}</span>
+                  <span style={styles.exDur}>{ex.duration}s</span>
+                  <button
+                    onClick={() => removeExercise(ex.uid)}
+                    style={styles.removeBtn}
+                    aria-label={`Remove ${ex.name}`}
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          <button onClick={() => setShowLibrary((s) => !s)} style={styles.addToggle}>
+            {showLibrary ? "− Hide exercise library" : "+ Add exercises"}
+          </button>
+          {showLibrary && (
+            <div style={styles.libraryGrid}>
+              {LIBRARY.map((ex) => (
+                <button key={ex.id} onClick={() => addExercise(ex.id)} style={styles.libChip}>
+                  + {ex.name} <span style={{ color: "#5B8DEF" }}>{ex.duration}s</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div style={styles.sectionLabel}>TIMING</div>
+          <Stepper
+            label="Rest between exercises"
+            value={restBetween}
+            unit="s"
+            onChange={(v) => {
+              setRestBetween(v);
+              setEdited(true);
+            }}
+            min={5}
+            max={60}
+            step={5}
+          />
+          <Stepper
+            label="Rest between rounds"
+            value={roundRest}
+            unit="s"
+            onChange={(v) => {
+              setRoundRest(v);
+              setEdited(true);
+            }}
+            min={30}
+            max={180}
+            step={15}
+          />
+          <Stepper
+            label="Rounds"
+            value={totalRounds}
+            unit=""
+            onChange={(v) => {
+              setTotalRounds(v);
+              setEdited(true);
+            }}
+            min={1}
+            max={5}
+            step={1}
+          />
+
+          <div style={styles.sectionLabel}>SAVE</div>
+          {isCustomSelected && (
+            <button
+              onClick={updateExistingPreset}
+              disabled={!edited || exercises.length === 0}
+              style={{
+                ...styles.updateBtn,
+                opacity: !edited || exercises.length === 0 ? 0.4 : 1,
+              }}
+            >
+              Update "{selectedName}"
+            </button>
+          )}
+          <div style={{ ...styles.saveRow, marginTop: isCustomSelected ? 10 : 0 }}>
+            <input
+              value={presetName}
+              onChange={(e) => setPresetName(e.target.value)}
+              placeholder="Save as new preset…"
+              style={styles.saveInput}
+            />
+            <button
+              onClick={saveAsNewPreset}
+              disabled={!presetName.trim() || exercises.length === 0}
+              style={{
+                ...styles.saveBtn,
+                opacity: !presetName.trim() || exercises.length === 0 ? 0.4 : 1,
+              }}
+            >
+              Save
+            </button>
+          </div>
+          {saveMsg && <div style={styles.saveMsg}>{saveMsg}</div>}
+
+          <button
+            onClick={() => setSetupView("preview")}
+            disabled={exercises.length === 0}
+            style={{ ...styles.startBtn, opacity: exercises.length === 0 ? 0.4 : 1 }}
+          >
+            DONE · ~{totalMins} MIN
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ================= DONE SCREEN =================
+  if (phase === "done") {
+    return (
+      <div style={{ ...styles.screen, background: THEME.done.bg }}>
+        <div style={styles.doneWrap}>
+          <div style={{ fontSize: 72 }}>💪</div>
+          <h1 style={styles.doneTitle}>Workout complete</h1>
+          <p style={styles.doneSub}>
+            {selectedName} · {totalRounds} rounds · {totalRounds * exercises.length} sets · ~
+            {totalMins} min
+          </p>
+          <button
+            onClick={() => {
+              reset();
+              setSetupView("preview");
+            }}
+            style={{ ...styles.startBtn, marginTop: 32 }}
+          >
+            GO AGAIN
+          </button>
+          <button
+            onClick={() => {
+              reset();
+              setSetupView("home");
+            }}
+            style={styles.editBtn}
+          >
+            All workouts
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ================= ACTIVE TIMER SCREEN =================
+  return (
+    <div style={{ ...styles.screen, background: theme.bg, transition: "background 0.4s ease" }}>
+      <div style={styles.topBar}>
+        <span style={{ ...styles.phaseTag, color: theme.accent }}>{theme.label}</span>
+        <span style={{ ...styles.roundTag, color: theme.accent }}>
+          ROUND {round}/{totalRounds}
+        </span>
+        <button
+          onClick={() => setSoundOn((s) => !s)}
+          style={{ ...styles.iconBtn, color: theme.accent }}
+          aria-label={soundOn ? "Mute sounds" : "Unmute sounds"}
+        >
+          {soundOn ? "🔊" : "🔇"}
+        </button>
+      </div>
+
+      <div style={styles.centerBlock}>
+        <div style={styles.exerciseName}>
+          {phase === "work" ? currentEx.name : phase === "ready" ? "Get in position" : "Breathe"}
+        </div>
+        {phase === "work" && (
+          <div style={{ ...styles.cue, color: theme.accent }}>{currentEx.cue}</div>
+        )}
+
+        <div style={styles.bigTime}>{fmt(timeLeft)}</div>
+
+        <div style={styles.progressTrack}>
+          <div
+            style={{
+              ...styles.progressFill,
+              width: `${progress * 100}%`,
+              background: theme.accent,
+            }}
+          />
+        </div>
+
+        <div style={styles.dots}>
+          {exercises.map((ex, i) => (
+            <div
+              key={ex.uid}
+              style={{
+                ...styles.dot,
+                background:
+                  i < exIndex || (i === exIndex && phase !== "ready")
+                    ? theme.accent
+                    : "rgba(255,255,255,0.25)",
+              }}
+            />
+          ))}
+        </div>
+
+        {nextEx && (
+          <div style={{ ...styles.upNext, color: theme.accent }}>
+            UP NEXT — {nextEx.name} · {nextEx.duration}s
+          </div>
+        )}
+      </div>
+
+      <div style={styles.controls}>
+        <button onClick={running ? goBack : reset} style={styles.ctrlBtnSecondary}>
+          {running ? "Back" : "Reset"}
+        </button>
+        <button onClick={togglePause} style={styles.ctrlBtnPrimary}>
+          {running ? "Pause" : "Resume"}
+        </button>
+        <button onClick={skip} style={styles.ctrlBtnSecondary}>
+          Skip
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---- Reusable stepper control ----
+function Stepper({ label, value, unit, onChange, min, max, step }) {
+  return (
+    <div style={styles.stepperRow}>
+      <span style={styles.stepperLabel}>{label}</span>
+      <div style={styles.stepperCtrl}>
+        <button
+          onClick={() => onChange(Math.max(min, value - step))}
+          style={styles.stepBtn}
+          aria-label={`Decrease ${label}`}
+        >
+          −
+        </button>
+        <span style={styles.stepValue}>
+          {value}
+          {unit}
+        </span>
+        <button
+          onClick={() => onChange(Math.min(max, value + step))}
+          style={styles.stepBtn}
+          aria-label={`Increase ${label}`}
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---- Styles ----
+const styles = {
+  screen: {
+    minHeight: "100vh",
+    display: "flex",
+    flexDirection: "column",
+    fontFamily:
+      "'Helvetica Neue', 'Arial Narrow', -apple-system, BlinkMacSystemFont, sans-serif",
+    color: "#fff",
+    userSelect: "none",
+  },
+  setupWrap: {
+    maxWidth: 440,
+    width: "100%",
+    margin: "0 auto",
+    padding: "36px 20px 48px",
+    display: "flex",
+    flexDirection: "column",
+    boxSizing: "border-box",
+  },
+  eyebrow: {
+    fontSize: 13,
+    letterSpacing: "0.3em",
+    color: "#5B8DEF",
+    fontWeight: 700,
+    marginBottom: 10,
+  },
+  setupTitle: {
+    fontSize: 38,
+    lineHeight: 1.05,
+    fontWeight: 800,
+    letterSpacing: "-0.02em",
+    margin: "0 0 24px",
+  },
+  backLink: {
+    alignSelf: "flex-start",
+    background: "none",
+    border: "none",
+    color: "#5B8DEF",
+    fontSize: 16,
+    fontWeight: 700,
+    cursor: "pointer",
+    padding: "0 0 20px",
+  },
+  editedTag: { fontSize: 16, fontWeight: 600, color: "#5B8DEF", verticalAlign: "middle" },
+  previewMeta: { fontSize: 15, color: "#8FA3BF", fontWeight: 500 },
+  presetCard: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    padding: "18px 18px",
+    borderRadius: 16,
+    border: "2px solid #26324A",
+    background: "#141C2C",
+    cursor: "pointer",
+  },
+  presetCardName: {
+    fontSize: 19,
+    fontWeight: 800,
+    marginBottom: 4,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  },
+  customBadge: {
+    fontSize: 10,
+    fontWeight: 800,
+    letterSpacing: "0.1em",
+    color: "#6EE7B7",
+    border: "1px solid #6EE7B7",
+    borderRadius: 6,
+    padding: "2px 6px",
+  },
+  presetCardMeta: { fontSize: 13, color: "#8FA3BF", fontWeight: 500 },
+  presetArrow: { fontSize: 28, color: "#5B8DEF", fontWeight: 400 },
+  cardDelete: {
+    width: 28,
+    height: 28,
+    borderRadius: "50%",
+    border: "none",
+    background: "#3B4A63",
+    color: "#fff",
+    fontSize: 16,
+    cursor: "pointer",
+    padding: 0,
+    flexShrink: 0,
+  },
+  previewRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 14,
+    padding: "13px 0",
+    borderBottom: "1px solid #26324A",
+  },
+  previewIndex: {
+    width: 24,
+    fontSize: 13,
+    fontWeight: 800,
+    color: "#5B8DEF",
+    fontVariantNumeric: "tabular-nums",
+  },
+  previewTiming: { display: "flex", gap: 12, marginTop: 24 },
+  timingItem: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    padding: "14px 12px",
+    borderRadius: 14,
+    background: "#141C2C",
+    border: "1px solid #26324A",
+    textAlign: "center",
+  },
+  timingValue: { fontSize: 22, fontWeight: 800, fontVariantNumeric: "tabular-nums" },
+  timingLabel: { fontSize: 11, color: "#8FA3BF", fontWeight: 600, lineHeight: 1.3 },
+  sectionLabel: {
+    fontSize: 12,
+    letterSpacing: "0.2em",
+    color: "#8FA3BF",
+    fontWeight: 700,
+    margin: "24px 0 10px",
+  },
+  exList: { borderTop: "1px solid #26324A" },
+  exRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    padding: "0 4px",
+  },
+  dragHandle: {
+    fontSize: 20,
+    color: "#5B8DEF",
+    cursor: "grab",
+    padding: "10px 12px 10px 4px",
+    touchAction: "none",
+    userSelect: "none",
+    WebkitUserSelect: "none",
+  },
+  exName: { fontSize: 16, fontWeight: 600, flex: 1 },
+  exDur: {
+    fontSize: 14,
+    fontWeight: 700,
+    color: "#5B8DEF",
+    fontVariantNumeric: "tabular-nums",
+  },
+  removeBtn: {
+    background: "none",
+    border: "none",
+    color: "#8FA3BF",
+    fontSize: 22,
+    cursor: "pointer",
+    padding: "0 4px",
+    lineHeight: 1,
+  },
+  addToggle: {
+    marginTop: 14,
+    padding: "12px",
+    borderRadius: 12,
+    border: "2px dashed #3B4A63",
+    background: "transparent",
+    color: "#8FA3BF",
+    fontSize: 15,
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  libraryGrid: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 },
+  libChip: {
+    padding: "8px 12px",
+    borderRadius: 10,
+    border: "1px solid #3B4A63",
+    background: "#161F30",
+    color: "#D7E0EF",
+    fontSize: 14,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  stepperRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "10px 0",
+    borderBottom: "1px solid #26324A",
+  },
+  stepperLabel: { fontSize: 15, fontWeight: 600, color: "#D7E0EF" },
+  stepperCtrl: { display: "flex", alignItems: "center", gap: 4 },
+  stepBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    border: "2px solid #3B4A63",
+    background: "transparent",
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  stepValue: {
+    minWidth: 58,
+    textAlign: "center",
+    fontSize: 17,
+    fontWeight: 800,
+    fontVariantNumeric: "tabular-nums",
+  },
+  updateBtn: {
+    width: "100%",
+    padding: "14px",
+    borderRadius: 12,
+    border: "none",
+    background: "#047857",
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: 800,
+    cursor: "pointer",
+    boxSizing: "border-box",
+  },
+  saveRow: { display: "flex", gap: 10 },
+  saveInput: {
+    flex: 1,
+    padding: "12px 14px",
+    borderRadius: 12,
+    border: "2px solid #3B4A63",
+    background: "#161F30",
+    color: "#fff",
+    fontSize: 15,
+    outline: "none",
+    minWidth: 0,
+  },
+  saveBtn: {
+    padding: "12px 20px",
+    borderRadius: 12,
+    border: "none",
+    background: "#3B4A63",
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  saveMsg: { marginTop: 8, fontSize: 14, color: "#6EE7B7", fontWeight: 600 },
+  startBtn: {
+    marginTop: 28,
+    padding: "20px",
+    borderRadius: 16,
+    border: "none",
+    background: "#1D4ED8",
+    color: "#fff",
+    fontSize: 17,
+    fontWeight: 800,
+    letterSpacing: "0.1em",
+    cursor: "pointer",
+  },
+  editBtn: {
+    marginTop: 12,
+    padding: "16px",
+    borderRadius: 16,
+    border: "2px solid #3B4A63",
+    background: "transparent",
+    color: "#B9C6DB",
+    fontSize: 16,
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  doneWrap: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    textAlign: "center",
+    padding: 24,
+  },
+  doneTitle: { fontSize: 40, fontWeight: 800, margin: "16px 0 8px" },
+  doneSub: { fontSize: 16, color: "#9CA3AF", margin: 0 },
+  topBar: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "20px 24px",
+  },
+  phaseTag: { fontSize: 14, fontWeight: 800, letterSpacing: "0.25em" },
+  roundTag: { fontSize: 14, fontWeight: 700, letterSpacing: "0.15em" },
+  iconBtn: { background: "none", border: "none", fontSize: 20, cursor: "pointer", padding: 4 },
+  centerBlock: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "0 24px",
+    textAlign: "center",
+  },
+  exerciseName: {
+    fontSize: "clamp(28px, 7vw, 44px)",
+    fontWeight: 800,
+    letterSpacing: "-0.01em",
+    marginBottom: 8,
+  },
+  cue: { fontSize: 15, fontWeight: 500, maxWidth: 340, lineHeight: 1.4 },
+  bigTime: {
+    fontSize: "clamp(96px, 28vw, 180px)",
+    fontWeight: 900,
+    lineHeight: 1,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.03em",
+    margin: "16px 0 24px",
+  },
+  progressTrack: {
+    width: "100%",
+    maxWidth: 360,
+    height: 8,
+    borderRadius: 4,
+    background: "rgba(255,255,255,0.2)",
+    overflow: "hidden",
+  },
+  progressFill: { height: "100%", borderRadius: 4, transition: "width 1s linear" },
+  dots: { display: "flex", gap: 10, marginTop: 24, flexWrap: "wrap", justifyContent: "center" },
+  dot: { width: 12, height: 12, borderRadius: "50%" },
+  upNext: { marginTop: 24, fontSize: 13, fontWeight: 700, letterSpacing: "0.15em" },
+  controls: {
+    display: "flex",
+    gap: 12,
+    padding: "0 24px 32px",
+    maxWidth: 480,
+    width: "100%",
+    margin: "0 auto",
+    boxSizing: "border-box",
+  },
+  ctrlBtnPrimary: {
+    flex: 2,
+    padding: "18px",
+    borderRadius: 14,
+    border: "none",
+    background: "rgba(255,255,255,0.95)",
+    color: "#111",
+    fontSize: 17,
+    fontWeight: 800,
+    cursor: "pointer",
+  },
+  ctrlBtnSecondary: {
+    flex: 1,
+    padding: "18px",
+    borderRadius: 14,
+    border: "2px solid rgba(255,255,255,0.4)",
+    background: "transparent",
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+};
+    ReactDOM.createRoot(document.getElementById("root")).render(<AbsWorkoutTimer />);
+  </script>
+</body>
+</html>
