@@ -26,23 +26,48 @@
 
 // ---- Exercise library ----
 const LIBRARY = [
-  { id: "plank", name: "Plank", duration: 60, cue: "Elbows under shoulders · squeeze glutes · hips level" },
-  { id: "bicycle", name: "Bicycle Crunches", duration: 40, cue: "Slow & controlled · elbow to opposite knee" },
-  { id: "legraise", name: "Leg Raises", duration: 40, cue: "Lower slowly · lower back pressed to floor" },
-  { id: "mtclimber", name: "Mountain Climbers", duration: 40, cue: "Fast pace · drive knees to chest" },
-  { id: "russian", name: "Russian Twists", duration: 40, cue: "Feet up if you can · rotate fully side to side" },
-  { id: "hollow", name: "Hollow Hold", duration: 40, cue: "Arms & legs extended · lower back glued to floor" },
-  { id: "vups", name: "V-Ups", duration: 40, cue: "Reach hands to toes · keep legs straight" },
-  { id: "sideplankL", name: "Side Plank (Left)", duration: 30, cue: "Stack shoulders & hips · don't let hips drop" },
-  { id: "sideplankR", name: "Side Plank (Right)", duration: 30, cue: "Stack shoulders & hips · don't let hips drop" },
-  { id: "flutter", name: "Flutter Kicks", duration: 40, cue: "Small quick kicks · hands under hips for support" },
-  { id: "deadbug", name: "Dead Bug", duration: 40, cue: "Opposite arm & leg · slow · core braced" },
-  { id: "revcrunch", name: "Reverse Crunches", duration: 40, cue: "Lift hips off floor · control on the way down" },
-  { id: "crunches", name: "Crunches", duration: 40, cue: "Chin off chest · lift with abs, not neck" },
-  { id: "heeltaps", name: "Heel Taps", duration: 40, cue: "Shoulders slightly up · reach side to side" },
-  { id: "toetouch", name: "Toe Touches", duration: 40, cue: "Legs vertical · reach up toward toes" },
+  { id: "plank", name: "Plank", duration: 60, cue: "Elbows under shoulders · squeeze glutes · hips level",
+    desc: "Face down, prop yourself on your forearms and toes with elbows under your shoulders. Keep your body in one straight line from head to heels and hold — don't let your hips sag or pike up." },
+  { id: "bicycle", name: "Bicycle Crunches", duration: 40, cue: "Slow & controlled · elbow to opposite knee",
+    desc: "Lie on your back, hands behind your head, legs lifted. Pedal your legs while twisting your torso, bringing each elbow toward the opposite knee. Alternate sides slowly — no yanking on your neck." },
+  { id: "legraise", name: "Leg Raises", duration: 40, cue: "Lower slowly · lower back pressed to floor",
+    desc: "Lie flat with legs straight. Keeping them together, raise your legs until vertical, then lower them slowly. Stop before your lower back arches off the floor." },
+  { id: "mtclimber", name: "Mountain Climbers", duration: 40, cue: "Fast pace · drive knees to chest",
+    desc: "Start in a push-up position. Drive one knee toward your chest, then quickly switch legs — like running in place with your hands on the floor. Keep your hips low." },
+  { id: "russian", name: "Russian Twists", duration: 40, cue: "Feet up if you can · rotate fully side to side",
+    desc: "Sit with knees bent, lean your torso back slightly and lift your feet off the floor if you can. Clasp your hands and rotate your torso side to side, tapping the floor beside each hip." },
+  { id: "hollow", name: "Hollow Hold", duration: 40, cue: "Arms & legs extended · lower back glued to floor",
+    desc: "Lie on your back and press your lower back into the floor. Lift your shoulders, extended arms, and straight legs a few inches off the ground, forming a shallow banana shape. Hold without letting your back arch." },
+  { id: "vups", name: "V-Ups", duration: 40, cue: "Reach hands to toes · keep legs straight",
+    desc: "Lie flat with arms extended overhead. In one motion, lift your straight legs and torso to fold into a V, reaching your hands toward your toes, then lower back down with control." },
+  { id: "sideplankL", name: "Side Plank (Left)", duration: 30, cue: "Stack shoulders & hips · don't let hips drop",
+    desc: "Lie on your left side and prop yourself on your left forearm, elbow under shoulder, feet stacked. Lift your hips so your body forms a straight line and hold." },
+  { id: "sideplankR", name: "Side Plank (Right)", duration: 30, cue: "Stack shoulders & hips · don't let hips drop",
+    desc: "Lie on your right side and prop yourself on your right forearm, elbow under shoulder, feet stacked. Lift your hips so your body forms a straight line and hold." },
+  { id: "flutter", name: "Flutter Kicks", duration: 40, cue: "Small quick kicks · hands under hips for support",
+    desc: "Lie on your back with legs extended and lifted slightly, hands under your hips. Kick your legs up and down in small, quick alternating motions without letting them touch the floor." },
+  { id: "deadbug", name: "Dead Bug", duration: 40, cue: "Opposite arm & leg · slow · core braced",
+    desc: "Lie on your back with arms pointing at the ceiling and knees bent 90°. Slowly lower one arm and the opposite leg toward the floor, return, then switch sides. Keep your lower back pressed down." },
+  { id: "revcrunch", name: "Reverse Crunches", duration: 40, cue: "Lift hips off floor · control on the way down",
+    desc: "Lie on your back with knees pulled toward your chest. Curl your hips up off the floor, bringing your knees toward your face, then lower slowly with control." },
+  { id: "crunches", name: "Crunches", duration: 40, cue: "Chin off chest · lift with abs, not neck",
+    desc: "Lie on your back with knees bent, feet flat, hands lightly behind your head. Lift your shoulder blades off the floor using your abs, then lower back down. Don't pull on your neck." },
+  { id: "heeltaps", name: "Heel Taps", duration: 40, cue: "Shoulders slightly up · reach side to side",
+    desc: "Lie on your back with knees bent, feet flat, arms at your sides. Lift your shoulders slightly and reach side to side, tapping each heel with your hand." },
+  { id: "toetouch", name: "Toe Touches", duration: 40, cue: "Legs vertical · reach up toward toes",
+    desc: "Lie on your back with legs raised straight up. Reach your hands toward your toes, lifting your shoulder blades off the floor, then lower back down with control." },
 ];
 const byId = (id) => LIBRARY.find((e) => e.id === id);
+
+// Preset exercise entries are either a plain id string or { id, duration }
+// when the duration was customized away from the library default.
+const resolveEntry = (entry) => {
+  const ex = byId(typeof entry === "string" ? entry : entry.id);
+  if (!ex) return null;
+  return typeof entry === "string" || entry.duration == null
+    ? ex
+    : { ...ex, duration: entry.duration };
+};
 
 // ---- Built-in presets ----
 const BUILTIN_PRESETS = [
@@ -115,7 +140,12 @@ const store = {
 };
 
 let uidCounter = 1;
-const withUids = (ids) => ids.map((exId) => ({ uid: `u${uidCounter++}`, exId }));
+const withUids = (entries) =>
+  entries.map((e) =>
+    typeof e === "string"
+      ? { uid: `u${uidCounter++}`, exId: e }
+      : { uid: `u${uidCounter++}`, exId: e.id, duration: e.duration }
+  );
 
 // ---- Phase colors ----
 const THEME = {
@@ -140,6 +170,8 @@ function AbsWorkoutTimer() {
   const [presetName, setPresetName] = useState("");
   const [showLibrary, setShowLibrary] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
+  const [infoUid, setInfoUid] = useState(null); // preview: expanded description row
+  const [libInfoId, setLibInfoId] = useState(null); // edit: library exercise info
 
   // ---- Drag state (commit on drop) ----
   const [dragIndex, setDragIndex] = useState(null);
@@ -160,7 +192,12 @@ function AbsWorkoutTimer() {
   const exercises = workout
     .map((w) => {
       const ex = byId(w.exId);
-      return ex ? { ...ex, uid: w.uid } : null;
+      if (!ex) return null;
+      return {
+        ...ex,
+        uid: w.uid,
+        duration: w.duration != null ? w.duration : ex.duration,
+      };
     })
     .filter(Boolean);
 
@@ -204,8 +241,24 @@ function AbsWorkoutTimer() {
     setEdited(true);
   };
 
+  const changeDuration = (uid, delta) => {
+    setWorkout((w) =>
+      w.map((item) => {
+        if (item.uid !== uid) return item;
+        const base = item.duration != null ? item.duration : byId(item.exId).duration;
+        return { ...item, duration: Math.max(10, Math.min(180, base + delta)) };
+      })
+    );
+    setEdited(true);
+  };
+
   const currentConfig = () => ({
-    exercises: workout.map((w) => w.exId),
+    exercises: workout.map((w) => {
+      const base = byId(w.exId);
+      return w.duration == null || (base && w.duration === base.duration)
+        ? w.exId
+        : { id: w.exId, duration: w.duration };
+    }),
     rest: restBetween,
     roundRest,
     rounds: totalRounds,
@@ -522,7 +575,7 @@ function AbsWorkoutTimer() {
 
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {allPresets.map((p) => {
-              const exs = p.exercises.map(byId).filter(Boolean);
+              const exs = p.exercises.map(resolveEntry).filter(Boolean);
               const mins = Math.max(
                 1,
                 Math.round(
@@ -581,14 +634,24 @@ function AbsWorkoutTimer() {
           <div style={styles.previewMeta}>
             {exercises.length} exercises · {totalRounds} rounds · ~{totalMins} min
           </div>
+          <div style={styles.previewHint}>Tap an exercise to see how it's done</div>
 
           <div style={{ ...styles.exList, marginTop: 20 }}>
             {exercises.map((ex, i) => (
-              <div key={ex.uid} style={styles.previewRow}>
-                <span style={styles.previewIndex}>{i + 1}</span>
-                <span style={styles.exName}>{ex.name}</span>
-                <span style={styles.exDur}>{ex.duration}s</span>
-              </div>
+              <React.Fragment key={ex.uid}>
+                <div
+                  style={{ ...styles.previewRow, cursor: "pointer" }}
+                  onClick={() => setInfoUid(infoUid === ex.uid ? null : ex.uid)}
+                >
+                  <span style={styles.previewIndex}>{i + 1}</span>
+                  <span style={styles.exName}>
+                    {ex.name}
+                    <span style={styles.infoIcon}>{infoUid === ex.uid ? "▾" : "ⓘ"}</span>
+                  </span>
+                  <span style={styles.exDur}>{ex.duration}s</span>
+                </div>
+                {infoUid === ex.uid && <div style={styles.descBox}>{ex.desc}</div>}
+              </React.Fragment>
             ))}
           </div>
 
@@ -627,7 +690,9 @@ function AbsWorkoutTimer() {
             ‹ Done editing
           </button>
           <h1 style={{ ...styles.setupTitle, marginBottom: 6 }}>Edit workout</h1>
-          <div style={styles.previewMeta}>Hold ⠿ and drag to reorder · tap × to remove</div>
+          <div style={styles.previewMeta}>
+            Hold ⠿ and drag to reorder · − / + to adjust time · tap × to remove
+          </div>
 
           <div style={styles.sectionLabel}>EXERCISES</div>
           <div style={styles.exList}>
@@ -666,7 +731,23 @@ function AbsWorkoutTimer() {
                     ⠿
                   </div>
                   <span style={styles.exName}>{ex.name}</span>
-                  <span style={styles.exDur}>{ex.duration}s</span>
+                  <button
+                    onClick={() => changeDuration(ex.uid, -5)}
+                    style={styles.durBtn}
+                    aria-label={`Decrease ${ex.name} time`}
+                  >
+                    −
+                  </button>
+                  <span style={{ ...styles.exDur, minWidth: 36, textAlign: "center" }}>
+                    {ex.duration}s
+                  </span>
+                  <button
+                    onClick={() => changeDuration(ex.uid, 5)}
+                    style={styles.durBtn}
+                    aria-label={`Increase ${ex.name} time`}
+                  >
+                    +
+                  </button>
                   <button
                     onClick={() => removeExercise(ex.uid)}
                     style={styles.removeBtn}
@@ -687,8 +768,23 @@ function AbsWorkoutTimer() {
               {LIBRARY.map((ex) => (
                 <button key={ex.id} onClick={() => addExercise(ex.id)} style={styles.libChip}>
                   + {ex.name} <span style={{ color: "#5B8DEF" }}>{ex.duration}s</span>
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setLibInfoId(libInfoId === ex.id ? null : ex.id);
+                    }}
+                    style={styles.libInfo}
+                    aria-label={`About ${ex.name}`}
+                  >
+                    ⓘ
+                  </span>
                 </button>
               ))}
+            </div>
+          )}
+          {showLibrary && libInfoId && byId(libInfoId) && (
+            <div style={{ ...styles.descBox, borderRadius: 12, marginTop: 10 }}>
+              <strong>{byId(libInfoId).name}</strong> — {byId(libInfoId).desc}
             </div>
           )}
 
@@ -958,6 +1054,16 @@ const styles = {
   },
   editedTag: { fontSize: 16, fontWeight: 600, color: "#5B8DEF", verticalAlign: "middle" },
   previewMeta: { fontSize: 15, color: "#8FA3BF", fontWeight: 500 },
+  previewHint: { fontSize: 13, color: "#5B8DEF", fontWeight: 600, marginTop: 6 },
+  infoIcon: { fontSize: 13, color: "#5B8DEF", marginLeft: 8, fontWeight: 400 },
+  descBox: {
+    padding: "10px 14px 14px 38px",
+    fontSize: 14,
+    color: "#B9C6DB",
+    lineHeight: 1.5,
+    borderBottom: "1px solid #26324A",
+    background: "#121A29",
+  },
   presetCard: {
     display: "flex",
     alignItems: "center",
@@ -1066,6 +1172,21 @@ const styles = {
     padding: "0 4px",
     lineHeight: 1,
   },
+  durBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    border: "1px solid #3B4A63",
+    background: "transparent",
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: 800,
+    cursor: "pointer",
+    padding: 0,
+    lineHeight: 1,
+    flexShrink: 0,
+  },
+  libInfo: { marginLeft: 8, color: "#8FA3BF", fontSize: 14 },
   addToggle: {
     marginTop: 14,
     padding: "12px",
