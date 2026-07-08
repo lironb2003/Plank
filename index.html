@@ -673,7 +673,13 @@ function AbsWorkoutTimer() {
           <button onClick={start} style={styles.startBtn}>
             START WORKOUT
           </button>
-          <button onClick={() => setSetupView("edit")} style={styles.editBtn}>
+          <button
+            onClick={() => {
+              setLibInfoId(null);
+              setSetupView("edit");
+            }}
+            style={styles.editBtn}
+          >
             Edit workout
           </button>
         </div>
@@ -788,12 +794,14 @@ function AbsWorkoutTimer() {
                         color: libInfoId === ex.id ? "#5B8DEF" : "#8FA3BF",
                       }}
                       aria-label={`About ${ex.name}`}
+                      aria-expanded={libInfoId === ex.id}
+                      aria-controls={`lib-desc-${ex.id}`}
                     >
-                      ⓘ
+                      {libInfoId === ex.id ? "▾" : "ⓘ"}
                     </button>
                   </div>
                   {libInfoId === ex.id && (
-                    <div style={{ ...styles.descBox, padding: "10px 14px", borderRadius: 12, flexBasis: "100%" }}>
+                    <div id={`lib-desc-${ex.id}`} style={styles.libDescBox}>
                       <strong>{ex.name}</strong> — {ex.desc}
                     </div>
                   )}
@@ -1220,6 +1228,15 @@ const styles = {
     cursor: "pointer",
   },
   libraryGrid: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 },
+  libDescBox: {
+    flexBasis: "100%",
+    padding: "10px 14px",
+    borderRadius: 12,
+    fontSize: 14,
+    color: "#B9C6DB",
+    lineHeight: 1.5,
+    background: "#121A29",
+  },
   libChip: {
     display: "flex",
     alignItems: "stretch",
