@@ -673,7 +673,13 @@ function AbsWorkoutTimer() {
           <button onClick={start} style={styles.startBtn}>
             START WORKOUT
           </button>
-          <button onClick={() => setSetupView("edit")} style={styles.editBtn}>
+          <button
+            onClick={() => {
+              setLibInfoId(null);
+              setSetupView("edit");
+            }}
+            style={styles.editBtn}
+          >
             Edit workout
           </button>
         </div>
@@ -760,31 +766,47 @@ function AbsWorkoutTimer() {
             })}
           </div>
 
-          <button onClick={() => setShowLibrary((s) => !s)} style={styles.addToggle}>
+          <button
+            onClick={() => {
+              setShowLibrary((s) => !s);
+              setLibInfoId(null);
+            }}
+            style={styles.addToggle}
+          >
             {showLibrary ? "− Hide exercise library" : "+ Add exercises"}
           </button>
           {showLibrary && (
             <div style={styles.libraryGrid}>
               {LIBRARY.map((ex) => (
-                <button key={ex.id} onClick={() => addExercise(ex.id)} style={styles.libChip}>
-                  + {ex.name} <span style={{ color: "#5B8DEF" }}>{ex.duration}s</span>
-                  <span
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setLibInfoId(libInfoId === ex.id ? null : ex.id);
-                    }}
-                    style={styles.libInfo}
-                    aria-label={`About ${ex.name}`}
-                  >
-                    ⓘ
-                  </span>
-                </button>
+                <React.Fragment key={ex.id}>
+                  <div style={styles.libChip}>
+                    <button
+                      onClick={() => addExercise(ex.id)}
+                      style={styles.libAdd}
+                      aria-label={`Add ${ex.name}`}
+                    >
+                      + {ex.name} <span style={{ color: "#5B8DEF" }}>{ex.duration}s</span>
+                    </button>
+                    <button
+                      onClick={() => setLibInfoId(libInfoId === ex.id ? null : ex.id)}
+                      style={{
+                        ...styles.libInfo,
+                        color: libInfoId === ex.id ? "#5B8DEF" : "#8FA3BF",
+                      }}
+                      aria-label={`About ${ex.name}`}
+                      aria-expanded={libInfoId === ex.id}
+                      aria-controls={`lib-desc-${ex.id}`}
+                    >
+                      {libInfoId === ex.id ? "▾" : "ⓘ"}
+                    </button>
+                  </div>
+                  {libInfoId === ex.id && (
+                    <div id={`lib-desc-${ex.id}`} style={styles.libDescBox}>
+                      <strong>{ex.name}</strong> — {ex.desc}
+                    </div>
+                  )}
+                </React.Fragment>
               ))}
-            </div>
-          )}
-          {showLibrary && libInfoId && byId(libInfoId) && (
-            <div style={{ ...styles.descBox, borderRadius: 12, marginTop: 10 }}>
-              <strong>{byId(libInfoId).name}</strong> — {byId(libInfoId).desc}
             </div>
           )}
 
@@ -1186,7 +1208,14 @@ const styles = {
     lineHeight: 1,
     flexShrink: 0,
   },
-  libInfo: { marginLeft: 8, color: "#8FA3BF", fontSize: 14 },
+  libInfo: {
+    padding: "8px 12px 8px 8px",
+    border: "none",
+    background: "transparent",
+    fontSize: 15,
+    fontFamily: "inherit",
+    cursor: "pointer",
+  },
   addToggle: {
     marginTop: 14,
     padding: "12px",
@@ -1199,14 +1228,30 @@ const styles = {
     cursor: "pointer",
   },
   libraryGrid: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 },
+  libDescBox: {
+    flexBasis: "100%",
+    padding: "10px 14px",
+    borderRadius: 12,
+    fontSize: 14,
+    color: "#B9C6DB",
+    lineHeight: 1.5,
+    background: "#121A29",
+  },
   libChip: {
-    padding: "8px 12px",
+    display: "flex",
+    alignItems: "stretch",
     borderRadius: 10,
     border: "1px solid #3B4A63",
     background: "#161F30",
+  },
+  libAdd: {
+    padding: "8px 4px 8px 12px",
+    border: "none",
+    background: "transparent",
     color: "#D7E0EF",
     fontSize: 14,
     fontWeight: 600,
+    fontFamily: "inherit",
     cursor: "pointer",
   },
   stepperRow: {
