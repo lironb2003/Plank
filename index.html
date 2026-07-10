@@ -14,6 +14,10 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <!-- Firebase (optional — the app runs localStorage-only if these fail to load) -->
+  <script src="https://www.gstatic.com/firebasejs/12.16.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/12.16.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore-compat.js"></script>
   <style>
     html, body { margin: 0; padding: 0; background: #0F1520; }
     #root { min-height: 100vh; }
@@ -101,43 +105,199 @@ const GET_READY = 10;
 const STORAGE_KEY = "abs-timer-custom-presets";
 const ROW_H = 56; // fixed row height for drag math
 
+// ==== FIREBASE CONFIG ======================================================
+// Paste your web-app config from the Firebase console here (Project settings
+// → Your apps → SDK setup and configuration → Config). This config is a
+// public identifier, not a secret — data is protected by Firestore security
+// rules. Leave the PASTE_ placeholders as-is to run without cloud sync
+// (localStorage only).
+const FIREBASE_CONFIG = {
+  apiKey: "PASTE_YOUR_API_KEY",
+  authDomain: "PASTE_YOUR_PROJECT.firebaseapp.com",
+  projectId: "PASTE_YOUR_PROJECT_ID",
+  appId: "PASTE_YOUR_APP_ID",
+};
+// ===========================================================================
+const MERGE_FLAG_PREFIX = "abs-timer-merged-"; // + uid: local→cloud merge done on this device
+const LOCAL_DIRTY_KEY = "abs-timer-local-dirty"; // signed-out writes force a re-merge
+
+// True only when the SDK loaded (gstatic reachable) AND a real config was
+// pasted AND initialization succeeded. False means every cloud code path is
+// skipped and the app behaves exactly like the localStorage-only version.
+const firebaseReady = (() => {
+  try {
+    if (typeof firebase === "undefined" || !firebase.initializeApp) return false;
+    if (!FIREBASE_CONFIG.apiKey || FIREBASE_CONFIG.apiKey.indexOf("PASTE_") === 0) return false;
+    if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+    return true;
+  } catch (e) {
+    return false;
+  }
+})();
+
 // ---- Persistence adapter ----
-// Uses Claude's artifact storage when available (persists across sessions on
-// claude.ai). If the app is exported and hosted as a standalone site, it
-// falls back to the browser's localStorage instead.
-const store = {
-  async get(key) {
-    if (typeof window !== "undefined" && window.storage) {
-      try {
-        const r = await window.storage.get(key);
-        return r && r.value != null ? r.value : null;
-      } catch (e) {
-        return null; // key doesn't exist yet
-      }
-    }
+// Local layer: Claude's artifact storage when available (persists across
+// sessions on claude.ai), else the browser's localStorage.
+const localGet = async (key) => {
+  if (typeof window !== "undefined" && window.storage) {
     try {
-      return window.localStorage.getItem(key);
+      const r = await window.storage.get(key);
+      return r && r.value != null ? r.value : null;
     } catch (e) {
-      return null;
+      return null; // key doesn't exist yet
     }
-  },
-  async set(key, value) {
-    if (typeof window !== "undefined" && window.storage) {
-      try {
-        await window.storage.set(key, value);
-        return true;
-      } catch (e) {
-        /* fall through to localStorage */
-      }
-    }
+  }
+  try {
+    return window.localStorage.getItem(key);
+  } catch (e) {
+    return null;
+  }
+};
+const localSet = async (key, value) => {
+  if (typeof window !== "undefined" && window.storage) {
     try {
-      window.localStorage.setItem(key, value);
+      await window.storage.set(key, value);
       return true;
     } catch (e) {
-      return false;
+      /* fall through to localStorage */
     }
+  }
+  try {
+    window.localStorage.setItem(key, value);
+    return true;
+  } catch (e) {
+    return false;
+  }
+};
+
+// Cloud layer: per-user Firestore docs users/{uid}/data/{key} → { value, updatedAt }.
+const cloudUid = () => {
+  try {
+    const u = firebaseReady ? firebase.auth().currentUser : null;
+    return u ? u.uid : null;
+  } catch (e) {
+    return null;
+  }
+};
+const cloudDoc = (uid, key) =>
+  firebase.firestore().collection("users").doc(uid).collection("data").doc(key);
+
+// The store decides cloud vs local itself, so call sites stay unchanged.
+// Writes go local-first (never lost, never block the UI), then push to
+// Firestore fire-and-forget — an offline Firestore set() doesn't resolve
+// until reconnect, so it must not be awaited on the save path.
+const store = {
+  notify: null, // set by the component: ("syncing"|"synced"|"error") => void
+  async get(key) {
+    const uid = cloudUid();
+    if (uid) {
+      try {
+        const snap = await cloudDoc(uid, key).get();
+        if (snap.exists && snap.data().value != null) {
+          const v = snap.data().value;
+          await localSet(key, v); // mirror down so sign-out keeps current data
+          return v;
+        }
+      } catch (e) {
+        /* cloud unreachable — fall through to local */
+      }
+    }
+    return localGet(key);
+  },
+  async set(key, value) {
+    const ok = await localSet(key, value);
+    const uid = cloudUid();
+    if (uid) {
+      if (store.notify) store.notify("syncing");
+      try {
+        cloudDoc(uid, key)
+          .set({ value: value, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
+          .then(() => {
+            if (store.notify) store.notify("synced");
+          })
+          .catch(() => {
+            if (store.notify) store.notify("error");
+          });
+      } catch (e) {
+        if (store.notify) store.notify("error");
+      }
+    } else {
+      try {
+        window.localStorage.setItem(LOCAL_DIRTY_KEY, "1");
+      } catch (e) {}
+    }
+    return ok;
   },
 };
+
+// One-time (per device+uid) local→cloud merge, then cloud is source of truth.
+// Merge rule: union by preset id; cloud wins on collision; cloud order first,
+// local-only presets appended. Signed-out writes set LOCAL_DIRTY_KEY, which
+// forces a re-merge so presets created while signed out survive the next
+// sign-in. (Signed-out *edits* to an already-synced preset id are superseded
+// by the cloud copy on re-merge.)
+async function loadPresetsForUser(uid) {
+  const parse = (s) => {
+    try {
+      const a = JSON.parse(s);
+      return Array.isArray(a) ? a : [];
+    } catch (e) {
+      return [];
+    }
+  };
+  let cloudRaw = null;
+  try {
+    const snap = await cloudDoc(uid, STORAGE_KEY).get();
+    if (snap.exists) cloudRaw = snap.data().value;
+  } catch (e) {
+    // Cloud unreachable: surface the local mirror instead, and don't set the
+    // merge flag so the merge retries on a later sign-in.
+    const err = new Error("cloud-unavailable");
+    err.fallback = parse(await localGet(STORAGE_KEY));
+    throw err;
+  }
+  const cloud = cloudRaw ? parse(cloudRaw) : [];
+  let merged = cloud;
+  let alreadyMerged = false;
+  let localDirty = false;
+  try {
+    alreadyMerged = window.localStorage.getItem(MERGE_FLAG_PREFIX + uid) === "1";
+    localDirty = window.localStorage.getItem(LOCAL_DIRTY_KEY) === "1";
+  } catch (e) {}
+  if (!alreadyMerged || localDirty) {
+    const local = parse(await localGet(STORAGE_KEY));
+    const cloudIds = {};
+    cloud.forEach((p) => {
+      if (p && p.id) cloudIds[p.id] = true;
+    });
+    const additions = local.filter((p) => p && p.id && !cloudIds[p.id]);
+    merged = cloud.concat(additions);
+    if (additions.length > 0) {
+      // Must succeed before the flag is set, so failed migrations retry.
+      try {
+        await cloudDoc(uid, STORAGE_KEY).set({
+          value: JSON.stringify(merged),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        });
+      } catch (e) {
+        try {
+          await localSet(STORAGE_KEY, JSON.stringify(merged));
+        } catch (e2) {}
+        const err = new Error("merge-write-failed");
+        err.fallback = merged;
+        throw err;
+      }
+    }
+    try {
+      window.localStorage.setItem(MERGE_FLAG_PREFIX + uid, "1");
+      window.localStorage.removeItem(LOCAL_DIRTY_KEY);
+    } catch (e) {}
+  }
+  try {
+    await localSet(STORAGE_KEY, JSON.stringify(merged));
+  } catch (e) {}
+  return merged;
+}
 
 let uidCounter = 1;
 const withUids = (entries) =>
@@ -173,6 +333,11 @@ function AbsWorkoutTimer() {
   const [infoUid, setInfoUid] = useState(null); // preview: expanded description row
   const [libInfoId, setLibInfoId] = useState(null); // edit: library exercise info
 
+  // ---- Account / cloud sync state ----
+  const [user, setUser] = useState(null);
+  const [authReady, setAuthReady] = useState(!firebaseReady); // no firebase => nothing to wait for
+  const [syncState, setSyncState] = useState("idle"); // idle | syncing | synced | error
+
   // ---- Drag state (commit on drop) ----
   const [dragIndex, setDragIndex] = useState(null);
   const [dragOffset, setDragOffset] = useState(0);
@@ -203,17 +368,93 @@ function AbsWorkoutTimer() {
 
   const isCustomSelected = customPresets.some((p) => p.id === selectedId);
 
-  // ---- Load saved presets ----
+  // ---- Auth subscription + sync notifications ----
   useEffect(() => {
+    store.notify = (s) => setSyncState(s);
+    if (!firebaseReady) {
+      return () => {
+        store.notify = null;
+      };
+    }
+    let unsub = null;
+    try {
+      unsub = firebase.auth().onAuthStateChanged(
+        (u) => {
+          setUser(u);
+          setAuthReady(true);
+        },
+        () => setAuthReady(true)
+      );
+    } catch (e) {
+      setAuthReady(true);
+    }
+    return () => {
+      store.notify = null;
+      if (unsub) unsub();
+    };
+  }, []);
+
+  // ---- Load saved presets (re-runs when the signed-in user changes) ----
+  useEffect(() => {
+    if (!authReady) return;
+    let cancelled = false;
     (async () => {
       try {
-        const value = await store.get(STORAGE_KEY);
-        if (value) setCustomPresets(JSON.parse(value));
+        if (user) setSyncState("syncing");
+        let presets;
+        if (user) {
+          presets = await loadPresetsForUser(user.uid); // includes one-time merge
+        } else {
+          const value = await store.get(STORAGE_KEY);
+          presets = value ? JSON.parse(value) : [];
+        }
+        if (!cancelled) {
+          setCustomPresets(presets);
+          if (user) setSyncState("synced");
+        }
       } catch (e) {
-        /* no saved presets yet */
+        if (!cancelled) {
+          if (e && e.fallback) setCustomPresets(e.fallback);
+          if (user) setSyncState("error");
+        }
       }
     })();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, user ? user.uid : null]);
+
+  const signIn = async () => {
+    try {
+      const provider = new firebase.auth.GoogleAuthProvider();
+      try {
+        await firebase.auth().signInWithPopup(provider);
+      } catch (e) {
+        // Popup blocked (common on mobile) → best-effort redirect fallback.
+        // Note: redirect with the default *.firebaseapp.com authDomain is
+        // degraded by third-party-cookie blocking in some browsers; popup is
+        // the primary path. A user closing the popup is not an error.
+        if (
+          e &&
+          (e.code === "auth/popup-blocked" ||
+            e.code === "auth/operation-not-supported-in-this-environment")
+        ) {
+          await firebase.auth().signInWithRedirect(provider);
+        } else if (!e || e.code !== "auth/popup-closed-by-user") {
+          setSyncState("error");
+        }
+      }
+    } catch (e) {
+      setSyncState("error");
+    }
+  };
+
+  const signOut = async () => {
+    try {
+      await firebase.auth().signOut();
+    } catch (e) {}
+    setSyncState("idle"); // the local mirror already holds the latest data
+  };
 
   const persistPresets = async (presets) => {
     await store.set(STORAGE_KEY, JSON.stringify(presets));
@@ -614,6 +855,43 @@ function AbsWorkoutTimer() {
               );
             })}
           </div>
+
+          {firebaseReady && (
+            <div style={styles.accountRow}>
+              {user ? (
+                <React.Fragment>
+                  {user.photoURL && (
+                    <img
+                      src={user.photoURL}
+                      alt=""
+                      referrerPolicy="no-referrer"
+                      style={styles.accountPhoto}
+                    />
+                  )}
+                  <span style={styles.accountName}>{user.displayName || user.email}</span>
+                  <span
+                    style={{
+                      ...styles.syncHint,
+                      color: syncState === "error" ? "#FCA5A5" : "#5F7290",
+                    }}
+                  >
+                    {syncState === "syncing"
+                      ? "Syncing…"
+                      : syncState === "error"
+                      ? "Offline — saved on this device"
+                      : "Synced"}
+                  </span>
+                  <button onClick={signOut} style={styles.signOutLink}>
+                    Sign out
+                  </button>
+                </React.Fragment>
+              ) : (
+                <button onClick={signIn} style={styles.accountBtn}>
+                  Sign in with Google to sync your presets
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -1115,6 +1393,39 @@ const styles = {
   },
   presetCardMeta: { fontSize: 13, color: "#8FA3BF", fontWeight: 500 },
   presetArrow: { fontSize: 28, color: "#5B8DEF", fontWeight: 400 },
+  accountRow: { display: "flex", alignItems: "center", gap: 10, marginTop: 28, minHeight: 36 },
+  accountBtn: {
+    width: "100%",
+    padding: "12px 16px",
+    borderRadius: 12,
+    border: "1.5px solid #26324A",
+    background: "#141C2C",
+    color: "#8FA3BF",
+    fontSize: 14,
+    fontWeight: 700,
+    fontFamily: "inherit",
+    cursor: "pointer",
+  },
+  accountPhoto: { width: 24, height: 24, borderRadius: "50%", flexShrink: 0 },
+  accountName: {
+    fontSize: 14,
+    fontWeight: 700,
+    color: "#B9C6DB",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  syncHint: { fontSize: 12, fontWeight: 600, marginLeft: "auto", whiteSpace: "nowrap" },
+  signOutLink: {
+    background: "none",
+    border: "none",
+    color: "#5B8DEF",
+    fontSize: 13,
+    fontWeight: 700,
+    fontFamily: "inherit",
+    cursor: "pointer",
+    padding: "6px 0 6px 6px",
+  },
   cardDelete: {
     width: 28,
     height: 28,
