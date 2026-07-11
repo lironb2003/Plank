@@ -215,11 +215,14 @@ const store = {
           .then(() => {
             if (store.notify) store.notify("synced");
           })
-          .catch(() => {
-            if (store.notify) store.notify("error");
+          .catch((e) => {
+            // permission-denied = the DB refused us (security rules), not a
+            // connectivity problem — surface it distinctly so it's actionable.
+            if (store.notify)
+              store.notify(e && e.code === "permission-denied" ? "denied" : "error");
           });
       } catch (e) {
-        if (store.notify) store.notify("error");
+        if (store.notify) store.notify(e && e.code === "permission-denied" ? "denied" : "error");
       }
     } else {
       try {
@@ -253,6 +256,7 @@ async function loadPresetsForUser(uid) {
     // Cloud unreachable: surface the local mirror instead, and don't set the
     // merge flag so the merge retries on a later sign-in.
     const err = new Error("cloud-unavailable");
+    err.code = e && e.code;
     err.fallback = parse(await localGet(STORAGE_KEY));
     throw err;
   }
@@ -284,6 +288,7 @@ async function loadPresetsForUser(uid) {
           await localSet(STORAGE_KEY, JSON.stringify(merged));
         } catch (e2) {}
         const err = new Error("merge-write-failed");
+        err.code = e && e.code;
         err.fallback = merged;
         throw err;
       }
@@ -415,7 +420,7 @@ function AbsWorkoutTimer() {
       } catch (e) {
         if (!cancelled) {
           if (e && e.fallback) setCustomPresets(e.fallback);
-          if (user) setSyncState("error");
+          if (user) setSyncState(e && e.code === "permission-denied" ? "denied" : "error");
         }
       }
     })();
@@ -872,11 +877,16 @@ function AbsWorkoutTimer() {
                   <span
                     style={{
                       ...styles.syncHint,
-                      color: syncState === "error" ? "#FCA5A5" : "#5F7290",
+                      color:
+                        syncState === "error" || syncState === "denied"
+                          ? "#FCA5A5"
+                          : "#5F7290",
                     }}
                   >
                     {syncState === "syncing"
                       ? "Syncing…"
+                      : syncState === "denied"
+                      ? "Sync blocked — publish the database rules"
                       : syncState === "error"
                       ? "Offline — saved on this device"
                       : "Synced"}
