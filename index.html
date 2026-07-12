@@ -830,10 +830,12 @@ function AbsWorkoutTimer() {
       );
     return (
       <div style={{ ...styles.screen, background: "#0F1520" }}>
-        <div style={{ ...styles.setupWrap, position: "relative" }}>
-          {firebaseReady && (
-            <div style={styles.accountCorner}>
-              {user ? (
+        <div style={styles.setupWrap}>
+          <div style={styles.homeTopBar}>
+            <div style={{ ...styles.eyebrow, marginBottom: 0 }}>ABS CIRCUIT</div>
+            {firebaseReady && (
+              <div style={styles.accountMenuWrap}>
+                {user ? (
                 <React.Fragment>
                   <button
                     onClick={() => setMenuOpen((o) => !o)}
@@ -893,10 +895,10 @@ function AbsWorkoutTimer() {
                   Sign in
                 </button>
               )}
-            </div>
-          )}
+              </div>
+            )}
+          </div>
 
-          <div style={styles.eyebrow}>ABS CIRCUIT</div>
           <h1 style={styles.setupTitle}>Pick your workout.</h1>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -1472,7 +1474,14 @@ const styles = {
   },
   presetCardMeta: { fontSize: 13, color: "#8FA3BF", fontWeight: 500 },
   presetArrow: { fontSize: 28, color: "#5B8DEF", fontWeight: 400 },
-  accountCorner: { position: "absolute", top: 30, right: 20, zIndex: 20 },
+  homeTopBar: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 10,
+  },
+  accountMenuWrap: { position: "relative", flexShrink: 0, zIndex: 20 },
   accountBtn: {
     padding: "8px 14px",
     borderRadius: 999,
