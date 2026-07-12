@@ -342,6 +342,7 @@ function AbsWorkoutTimer() {
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(!firebaseReady); // no firebase => nothing to wait for
   const [syncState, setSyncState] = useState("idle"); // idle | syncing | synced | error
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
 
   // ---- Drag state (commit on drop) ----
   const [dragIndex, setDragIndex] = useState(null);
@@ -455,6 +456,7 @@ function AbsWorkoutTimer() {
   };
 
   const signOut = async () => {
+    setAccountMenuOpen(false);
     try {
       await firebase.auth().signOut();
     } catch (e) {}
@@ -816,7 +818,62 @@ function AbsWorkoutTimer() {
     return (
       <div style={{ ...styles.screen, background: "#0F1520" }}>
         <div style={styles.setupWrap}>
-          <div style={styles.eyebrow}>ABS CIRCUIT</div>
+          <div style={styles.topBar}>
+            <div style={{ ...styles.eyebrow, marginBottom: 0 }}>ABS CIRCUIT</div>
+            {firebaseReady && user && (
+              <div style={styles.accountMenuWrap}>
+                <button
+                  onClick={() => setAccountMenuOpen((o) => !o)}
+                  style={styles.accountChip}
+                  aria-haspopup="menu"
+                  aria-expanded={accountMenuOpen}
+                >
+                  {user.photoURL && (
+                    <img
+                      src={user.photoURL}
+                      alt=""
+                      referrerPolicy="no-referrer"
+                      style={styles.accountPhoto}
+                    />
+                  )}
+                  <span style={{ ...styles.accountName, maxWidth: 140 }}>
+                    {user.displayName || user.email}
+                  </span>
+                  <span style={styles.accountCaret}>{accountMenuOpen ? "▴" : "▾"}</span>
+                </button>
+                {accountMenuOpen && (
+                  <React.Fragment>
+                    <div
+                      style={styles.menuBackdrop}
+                      onClick={() => setAccountMenuOpen(false)}
+                    />
+                    <div style={styles.accountMenu} role="menu">
+                      <div
+                        style={{
+                          ...styles.menuSyncStatus,
+                          color:
+                            syncState === "error" || syncState === "denied"
+                              ? "#FCA5A5"
+                              : "#5F7290",
+                        }}
+                      >
+                        {syncState === "syncing"
+                          ? "Syncing…"
+                          : syncState === "denied"
+                          ? "Sync blocked — publish the database rules"
+                          : syncState === "error"
+                          ? "Offline — saved on this device"
+                          : "Synced"}
+                      </div>
+                      <button onClick={signOut} style={styles.menuSignOut} role="menuitem">
+                        Sign out
+                      </button>
+                    </div>
+                  </React.Fragment>
+                )}
+              </div>
+            )}
+          </div>
           <h1 style={styles.setupTitle}>Pick your workout.</h1>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -861,45 +918,11 @@ function AbsWorkoutTimer() {
             })}
           </div>
 
-          {firebaseReady && (
+          {firebaseReady && !user && (
             <div style={styles.accountRow}>
-              {user ? (
-                <React.Fragment>
-                  {user.photoURL && (
-                    <img
-                      src={user.photoURL}
-                      alt=""
-                      referrerPolicy="no-referrer"
-                      style={styles.accountPhoto}
-                    />
-                  )}
-                  <span style={styles.accountName}>{user.displayName || user.email}</span>
-                  <span
-                    style={{
-                      ...styles.syncHint,
-                      color:
-                        syncState === "error" || syncState === "denied"
-                          ? "#FCA5A5"
-                          : "#5F7290",
-                    }}
-                  >
-                    {syncState === "syncing"
-                      ? "Syncing…"
-                      : syncState === "denied"
-                      ? "Sync blocked — publish the database rules"
-                      : syncState === "error"
-                      ? "Offline — saved on this device"
-                      : "Synced"}
-                  </span>
-                  <button onClick={signOut} style={styles.signOutLink}>
-                    Sign out
-                  </button>
-                </React.Fragment>
-              ) : (
-                <button onClick={signIn} style={styles.accountBtn}>
-                  Sign in with Google to sync your presets
-                </button>
-              )}
+              <button onClick={signIn} style={styles.accountBtn}>
+                Sign in with Google to sync your presets
+              </button>
             </div>
           )}
         </div>
@@ -1425,16 +1448,58 @@ const styles = {
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   },
-  syncHint: { fontSize: 12, fontWeight: 600, marginLeft: "auto", whiteSpace: "nowrap" },
-  signOutLink: {
+  topBar: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 10,
+  },
+  accountMenuWrap: { position: "relative", flexShrink: 0 },
+  accountChip: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "5px 10px 5px 6px",
+    borderRadius: 999,
+    border: "1.5px solid #26324A",
+    background: "#141C2C",
+    fontFamily: "inherit",
+    cursor: "pointer",
+  },
+  accountCaret: { fontSize: 10, color: "#5F7290" },
+  menuBackdrop: { position: "fixed", inset: 0, zIndex: 40 },
+  accountMenu: {
+    position: "absolute",
+    top: "calc(100% + 8px)",
+    right: 0,
+    zIndex: 50,
+    minWidth: 210,
+    padding: 6,
+    borderRadius: 12,
+    border: "1.5px solid #26324A",
+    background: "#141C2C",
+    boxShadow: "0 12px 32px rgba(0,0,0,0.45)",
+  },
+  menuSyncStatus: {
+    fontSize: 12,
+    fontWeight: 600,
+    padding: "8px 10px 10px",
+    borderBottom: "1px solid #26324A",
+  },
+  menuSignOut: {
+    display: "block",
+    width: "100%",
+    textAlign: "left",
     background: "none",
     border: "none",
     color: "#5B8DEF",
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: 700,
     fontFamily: "inherit",
     cursor: "pointer",
-    padding: "6px 0 6px 6px",
+    padding: "10px 10px 8px",
+    borderRadius: 8,
   },
   cardDelete: {
     width: 28,
