@@ -388,6 +388,7 @@ function AbsWorkoutTimer() {
       unsub = firebase.auth().onAuthStateChanged(
         (u) => {
           setUser(u);
+          setMenuOpen(false); // menu belongs to the previous auth state
           setAuthReady(true);
         },
         () => setAuthReady(true)
@@ -417,11 +418,15 @@ function AbsWorkoutTimer() {
         }
         if (!cancelled) {
           setCustomPresets(presets);
+          setConfirmDelete(null); // pending confirmation may target a preset gone after reload
           if (user) setSyncState("synced");
         }
       } catch (e) {
         if (!cancelled) {
-          if (e && e.fallback) setCustomPresets(e.fallback);
+          if (e && e.fallback) {
+            setCustomPresets(e.fallback);
+            setConfirmDelete(null);
+          }
           if (user) setSyncState(e && e.code === "permission-denied" ? "denied" : "error");
         }
       }
@@ -816,6 +821,13 @@ function AbsWorkoutTimer() {
 
   // ================= HOME: PICK A PRESET =================
   if (phase === "idle" && setupView === "home") {
+    const accountLabel = user ? user.displayName || user.email : "";
+    const renderAvatar = (photoStyle, fallbackStyle) =>
+      user.photoURL ? (
+        <img src={user.photoURL} alt="" referrerPolicy="no-referrer" style={photoStyle} />
+      ) : (
+        <span style={fallbackStyle}>{(accountLabel || "?").charAt(0).toUpperCase()}</span>
+      );
     return (
       <div style={{ ...styles.screen, background: "#0F1520" }}>
         <div style={{ ...styles.setupWrap, position: "relative" }}>
@@ -827,41 +839,21 @@ function AbsWorkoutTimer() {
                     onClick={() => setMenuOpen((o) => !o)}
                     style={styles.avatarBtn}
                     aria-label="Account menu"
+                    aria-haspopup="menu"
                     aria-expanded={menuOpen}
                   >
-                    {user.photoURL ? (
-                      <img
-                        src={user.photoURL}
-                        alt=""
-                        referrerPolicy="no-referrer"
-                        style={styles.avatarImg}
-                      />
-                    ) : (
-                      <span style={styles.avatarFallback}>
-                        {(user.displayName || user.email || "?").charAt(0).toUpperCase()}
-                      </span>
-                    )}
+                    {renderAvatar(styles.avatarImg, styles.avatarFallback)}
                   </button>
                   {menuOpen && (
                     <React.Fragment>
                       <div style={styles.menuBackdrop} onClick={() => setMenuOpen(false)} />
-                      <div style={styles.accountMenu}>
+                      <div style={styles.accountMenu} role="menu">
                         <div style={styles.accountMenuHeader}>
-                          {user.photoURL ? (
-                            <img
-                              src={user.photoURL}
-                              alt=""
-                              referrerPolicy="no-referrer"
-                              style={styles.accountPhoto}
-                            />
-                          ) : (
-                            <span style={{ ...styles.avatarFallback, ...styles.accountPhoto }}>
-                              {(user.displayName || user.email || "?").charAt(0).toUpperCase()}
-                            </span>
-                          )}
-                          <span style={styles.accountName}>
-                            {user.displayName || user.email}
-                          </span>
+                          {renderAvatar(styles.accountPhoto, {
+                            ...styles.avatarFallback,
+                            ...styles.accountPhoto,
+                          })}
+                          <span style={styles.accountName}>{accountLabel}</span>
                         </div>
                         <div
                           style={{
@@ -880,7 +872,7 @@ function AbsWorkoutTimer() {
                             ? "Offline — saved on this device"
                             : "Synced"}
                         </div>
-                        <button onClick={signOut} style={styles.signOutLink}>
+                        <button onClick={signOut} style={styles.signOutLink} role="menuitem">
                           Sign out
                         </button>
                       </div>
@@ -888,7 +880,11 @@ function AbsWorkoutTimer() {
                   )}
                 </React.Fragment>
               ) : (
-                <button onClick={signIn} style={styles.accountBtn}>
+                <button
+                  onClick={signIn}
+                  style={styles.accountBtn}
+                  title="Sign in with Google to sync your presets"
+                >
                   Sign in
                 </button>
               )}
@@ -940,6 +936,11 @@ function AbsWorkoutTimer() {
             })}
           </div>
 
+          {firebaseReady && !user && (
+            <div style={styles.signInHint}>
+              Sign in with Google to sync your presets across devices.
+            </div>
+          )}
         </div>
 
         {confirmDelete && (
@@ -1532,6 +1533,7 @@ const styles = {
     whiteSpace: "nowrap",
   },
   syncHint: { fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" },
+  signInHint: { marginTop: 18, fontSize: 13, fontWeight: 600, color: "#5F7290" },
   signOutLink: {
     background: "none",
     border: "none",
