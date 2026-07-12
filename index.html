@@ -837,12 +837,17 @@ function AbsWorkoutTimer() {
                 <React.Fragment>
                   <button
                     onClick={() => setMenuOpen((o) => !o)}
-                    style={styles.avatarBtn}
+                    style={styles.accountChip}
                     aria-label="Account menu"
                     aria-haspopup="menu"
                     aria-expanded={menuOpen}
                   >
-                    {renderAvatar(styles.avatarImg, styles.avatarFallback)}
+                    {renderAvatar(styles.accountPhoto, {
+                      ...styles.avatarFallback,
+                      ...styles.accountPhoto,
+                    })}
+                    <span style={{ ...styles.accountName, maxWidth: 140 }}>{accountLabel}</span>
+                    <span style={styles.accountCaret}>{menuOpen ? "▴" : "▾"}</span>
                   </button>
                   {menuOpen && (
                     <React.Fragment>
@@ -1480,20 +1485,18 @@ const styles = {
     cursor: "pointer",
     whiteSpace: "nowrap",
   },
-  avatarBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: "50%",
-    border: "2px solid #26324A",
-    background: "#141C2C",
-    padding: 0,
-    cursor: "pointer",
-    overflow: "hidden",
+  accountChip: {
     display: "flex",
     alignItems: "center",
-    justifyContent: "center",
+    gap: 8,
+    padding: "5px 10px 5px 6px",
+    borderRadius: 999,
+    border: "1.5px solid #26324A",
+    background: "#141C2C",
+    fontFamily: "inherit",
+    cursor: "pointer",
   },
-  avatarImg: { width: "100%", height: "100%", display: "block", objectFit: "cover" },
+  accountCaret: { fontSize: 10, color: "#5F7290" },
   avatarFallback: {
     display: "flex",
     alignItems: "center",
