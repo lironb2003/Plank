@@ -105,6 +105,239 @@ const GET_READY = 10;
 const STORAGE_KEY = "abs-timer-custom-presets";
 const ROW_H = 56; // fixed row height for drag math
 
+// ---- Gym tracker: storage keys ----
+const GYM_SESSIONS_KEY = "abs-timer-gym-sessions"; // [{ id, startedAt, endedAt, entries: [{ exId, sets: [{ weight, reps }] }] }]
+const GYM_WEIGHTS_KEY = "abs-timer-gym-weights"; // { [exId]: { weight, reps, at } } — last weight used per exercise
+const GYM_ACTIVE_KEY = "abs-timer-gym-active"; // in-progress session (survives reload), or null
+
+// ---- Gym exercise catalog ----
+// Searchable in English and Hebrew. `alt` holds extra aliases/keywords.
+const GYM_GROUP_HE = {
+  Chest: "חזה",
+  Back: "גב",
+  Shoulders: "כתפיים",
+  Biceps: "יד קדמית",
+  Triceps: "יד אחורית",
+  Forearms: "אמות",
+  Legs: "רגליים",
+  Glutes: "ישבן",
+  Calves: "תאומים",
+  Core: "בטן",
+  Cardio: "אירובי",
+  "Full Body": "כל הגוף",
+};
+const GYM_GROUPS = Object.keys(GYM_GROUP_HE);
+const GYM_EXERCISES = [
+  // Chest
+  { id: "benchpress", name: "Bench Press", he: "לחיצת חזה במוט", group: "Chest", alt: "barbell flat" },
+  { id: "inclinebench", name: "Incline Bench Press", he: "לחיצת חזה בשיפוע עולה", group: "Chest" },
+  { id: "declinebench", name: "Decline Bench Press", he: "לחיצת חזה בשיפוע יורד", group: "Chest" },
+  { id: "dbchestpress", name: "Dumbbell Chest Press", he: "לחיצת חזה עם משקולות יד", group: "Chest", alt: "dumbell" },
+  { id: "inclinedbpress", name: "Incline Dumbbell Press", he: "לחיצת חזה משקולות בשיפוע", group: "Chest", alt: "dumbell" },
+  { id: "dbfly", name: "Dumbbell Fly", he: "פרפר עם משקולות", group: "Chest", alt: "flye dumbell" },
+  { id: "cablecross", name: "Cable Crossover", he: "קרוסאובר בכבלים", group: "Chest", alt: "crossover fly" },
+  { id: "pecdeck", name: "Pec Deck (Machine Fly)", he: "מכונת פרפר", group: "Chest", alt: "butterfly" },
+  { id: "machinechestpress", name: "Chest Press Machine", he: "מכונת לחיצת חזה", group: "Chest" },
+  { id: "pushup", name: "Push-Ups", he: "שכיבות סמיכה", group: "Chest", alt: "pushup press up" },
+  { id: "chestdips", name: "Chest Dips", he: "מקבילים לחזה", group: "Chest", alt: "dip" },
+  // Back
+  { id: "deadlift", name: "Deadlift", he: "דדליפט", group: "Back", alt: "הרמת מתים" },
+  { id: "sumodeadlift", name: "Sumo Deadlift", he: "דדליפט סומו", group: "Back" },
+  { id: "rackpull", name: "Rack Pull", he: "ראק פול", group: "Back" },
+  { id: "pullup", name: "Pull-Ups", he: "עליות מתח", group: "Back", alt: "pullup מתח" },
+  { id: "chinup", name: "Chin-Ups", he: "עליות מתח באחיזה הפוכה", group: "Back", alt: "chinup" },
+  { id: "latpulldown", name: "Lat Pulldown", he: "פולי עליון", group: "Back", alt: "pull down" },
+  { id: "closegrippulldown", name: "Close-Grip Pulldown", he: "פולי עליון אחיזה צרה", group: "Back" },
+  { id: "seatedrow", name: "Seated Cable Row", he: "חתירה בפולי תחתון", group: "Back", alt: "חתירה בישיבה" },
+  { id: "barbellrow", name: "Barbell Row", he: "חתירה בשיפוע עם מוט", group: "Back", alt: "bent over" },
+  { id: "dbrow", name: "One-Arm Dumbbell Row", he: "חתירת יד אחת עם משקולת", group: "Back", alt: "dumbell" },
+  { id: "tbarrow", name: "T-Bar Row", he: "חתירת טי-בר", group: "Back" },
+  { id: "machinerow", name: "Machine Row", he: "מכונת חתירה בישיבה", group: "Back" },
+  { id: "straightarmpulldown", name: "Straight-Arm Pulldown", he: "פול אובר בכבל", group: "Back" },
+  { id: "backext", name: "Back Extension", he: "היפראקסטנשן", group: "Back", alt: "hyperextension יישור גב" },
+  { id: "goodmorning", name: "Good Morning", he: "גוד מורנינג", group: "Back" },
+  { id: "dbpullover", name: "Dumbbell Pullover", he: "פול אובר עם משקולת", group: "Back" },
+  // Shoulders
+  { id: "ohp", name: "Overhead Press", he: "לחיצת כתפיים במוט", group: "Shoulders", alt: "military press" },
+  { id: "dbshoulderpress", name: "Dumbbell Shoulder Press", he: "לחיצת כתפיים עם משקולות", group: "Shoulders", alt: "dumbell" },
+  { id: "arnoldpress", name: "Arnold Press", he: "לחיצת ארנולד", group: "Shoulders" },
+  { id: "machineshoulderpress", name: "Shoulder Press Machine", he: "מכונת לחיצת כתפיים", group: "Shoulders" },
+  { id: "latraise", name: "Lateral Raise", he: "הרחקת כתפיים לצדדים", group: "Shoulders", alt: "side raise צד" },
+  { id: "cablelatraise", name: "Cable Lateral Raise", he: "הרחקת כתפיים בכבל", group: "Shoulders" },
+  { id: "frontraise", name: "Front Raise", he: "הרמת ידיים לפנים", group: "Shoulders" },
+  { id: "reardeltfly", name: "Rear Delt Fly", he: "פרפר הפוך", group: "Shoulders", alt: "reverse fly" },
+  { id: "facepull", name: "Face Pull", he: "פייס פול", group: "Shoulders", alt: "משיכת פנים בכבל" },
+  { id: "uprightrow", name: "Upright Row", he: "חתירה אנכית", group: "Shoulders", alt: "משיכת סנטר" },
+  { id: "shrugs", name: "Shrugs", he: "משיכות כתפיים", group: "Shoulders", alt: "שראגס trapezius" },
+  // Biceps
+  { id: "barbellcurl", name: "Barbell Curl", he: "כפיפת מרפקים במוט", group: "Biceps", alt: "bicep" },
+  { id: "ezcurl", name: "EZ-Bar Curl", he: "כפיפת מרפקים במוט EZ", group: "Biceps" },
+  { id: "dbcurl", name: "Dumbbell Curl", he: "כפיפת מרפקים עם משקולות", group: "Biceps", alt: "dumbell bicep" },
+  { id: "hammercurl", name: "Hammer Curl", he: "כפיפת פטיש", group: "Biceps" },
+  { id: "inclinecurl", name: "Incline Dumbbell Curl", he: "כפיפת מרפקים בשיפוע", group: "Biceps" },
+  { id: "preachercurl", name: "Preacher Curl", he: "כפיפת מרפקים בספסל סקוט", group: "Biceps" },
+  { id: "concentrationcurl", name: "Concentration Curl", he: "כפיפת ריכוז", group: "Biceps" },
+  { id: "cablecurl", name: "Cable Curl", he: "כפיפת מרפקים בכבל", group: "Biceps" },
+  { id: "spidercurl", name: "Spider Curl", he: "ספיידר קרל", group: "Biceps" },
+  // Triceps
+  { id: "closegripbench", name: "Close-Grip Bench Press", he: "לחיצת חזה באחיזה צרה", group: "Triceps" },
+  { id: "skullcrusher", name: "Skull Crushers", he: "לחיצה צרפתית", group: "Triceps", alt: "french press lying tricep" },
+  { id: "pushdown", name: "Tricep Pushdown", he: "פשיטת מרפקים בפולי עליון", group: "Triceps", alt: "push down" },
+  { id: "ropepushdown", name: "Rope Pushdown", he: "פשיטת מרפקים בחבל", group: "Triceps" },
+  { id: "overheadtricepext", name: "Overhead Tricep Extension", he: "פשיטת מרפקים מעל הראש", group: "Triceps" },
+  { id: "tricepdips", name: "Tricep Dips", he: "מקבילים ליד אחורית", group: "Triceps", alt: "dip bench" },
+  { id: "kickback", name: "Tricep Kickback", he: "קיקבק עם משקולת", group: "Triceps" },
+  { id: "machinetricepext", name: "Tricep Extension Machine", he: "מכונת פשיטת מרפקים", group: "Triceps" },
+  // Forearms
+  { id: "wristcurl", name: "Wrist Curl", he: "כפיפת שורש כף היד", group: "Forearms" },
+  { id: "revwristcurl", name: "Reverse Wrist Curl", he: "פשיטת שורש כף היד", group: "Forearms" },
+  { id: "reversecurl", name: "Reverse Curl", he: "כפיפת מרפקים באחיזה הפוכה", group: "Forearms" },
+  { id: "farmerswalk", name: "Farmer's Walk", he: "הליכת איכר", group: "Forearms", alt: "carry" },
+  // Legs
+  { id: "squat", name: "Squat", he: "סקוואט", group: "Legs", alt: "barbell back" },
+  { id: "frontsquat", name: "Front Squat", he: "סקוואט קדמי", group: "Legs" },
+  { id: "smithsquat", name: "Smith Machine Squat", he: "סקוואט בסמית' משין", group: "Legs" },
+  { id: "gobletsquat", name: "Goblet Squat", he: "גובלט סקוואט", group: "Legs" },
+  { id: "hacksquat", name: "Hack Squat", he: "האק סקוואט", group: "Legs" },
+  { id: "legpress", name: "Leg Press", he: "לחיצת רגליים", group: "Legs" },
+  { id: "legext", name: "Leg Extension", he: "פשיטת ברכיים במכונה", group: "Legs", alt: "quad" },
+  { id: "lyinglegcurl", name: "Lying Leg Curl", he: "כפיפת ברכיים בשכיבה", group: "Legs", alt: "hamstring" },
+  { id: "seatedlegcurl", name: "Seated Leg Curl", he: "כפיפת ברכיים בישיבה", group: "Legs", alt: "hamstring" },
+  { id: "rdl", name: "Romanian Deadlift", he: "דדליפט רומני", group: "Legs", alt: "rdl" },
+  { id: "lunge", name: "Lunges", he: "לאנג'ים", group: "Legs", alt: "פסיעות" },
+  { id: "walkinglunge", name: "Walking Lunges", he: "לאנג'ים בהליכה", group: "Legs" },
+  { id: "bulgariansplit", name: "Bulgarian Split Squat", he: "סקוואט בולגרי", group: "Legs" },
+  { id: "stepup", name: "Step-Ups", he: "עליות מדרגה", group: "Legs" },
+  { id: "boxjump", name: "Box Jumps", he: "קפיצות לארגז", group: "Legs" },
+  { id: "pistolsquat", name: "Pistol Squat", he: "פיסטול סקוואט", group: "Legs", alt: "סקוואט על רגל אחת" },
+  // Glutes
+  { id: "hipthrust", name: "Hip Thrust", he: "היפ ת'ראסט", group: "Glutes", alt: "הרמת אגן עם מוט" },
+  { id: "glutebridge", name: "Glute Bridge", he: "גשר אגן", group: "Glutes" },
+  { id: "cablekickback", name: "Cable Glute Kickback", he: "בעיטה לאחור בכבל", group: "Glutes" },
+  { id: "hipabduction", name: "Hip Abduction Machine", he: "הרחקת ירכיים במכונה", group: "Glutes" },
+  { id: "hipadduction", name: "Hip Adduction Machine", he: "קירוב ירכיים במכונה", group: "Glutes" },
+  // Calves
+  { id: "standingcalfraise", name: "Standing Calf Raise", he: "הרמות עקבים בעמידה", group: "Calves", alt: "תאומים" },
+  { id: "seatedcalfraise", name: "Seated Calf Raise", he: "הרמות עקבים בישיבה", group: "Calves", alt: "תאומים" },
+  // Core
+  { id: "crunch", name: "Crunches", he: "כפיפות בטן", group: "Core" },
+  { id: "situp", name: "Sit-Ups", he: "עליות בטן מלאות", group: "Core", alt: "situps" },
+  { id: "plankhold", name: "Plank", he: "פלאנק", group: "Core" },
+  { id: "sideplank", name: "Side Plank", he: "פלאנק צד", group: "Core" },
+  { id: "russiantwist", name: "Russian Twist", he: "טוויסט רוסי", group: "Core" },
+  { id: "legraisecore", name: "Leg Raises", he: "הרמות רגליים", group: "Core" },
+  { id: "hanginglegraise", name: "Hanging Leg Raise", he: "הרמות רגליים בתלייה", group: "Core" },
+  { id: "hangingkneeraise", name: "Hanging Knee Raise", he: "הרמות ברכיים בתלייה", group: "Core" },
+  { id: "toestobar", name: "Toes to Bar", he: "אצבעות למוט", group: "Core" },
+  { id: "cablecrunch", name: "Cable Crunch", he: "כפיפות בטן בכבל", group: "Core" },
+  { id: "abwheel", name: "Ab Wheel Rollout", he: "גלגל בטן", group: "Core" },
+  { id: "mountainclimber", name: "Mountain Climbers", he: "מטפס הרים", group: "Core" },
+  { id: "bicyclecrunch", name: "Bicycle Crunches", he: "כפיפות בטן אופניים", group: "Core" },
+  { id: "vupcore", name: "V-Ups", he: "וי-אפס", group: "Core" },
+  { id: "woodchop", name: "Cable Wood Chop", he: "חיתוך עצים בכבל", group: "Core" },
+  { id: "pallofpress", name: "Pallof Press", he: "לחיצת פאלוף", group: "Core" },
+  // Cardio
+  { id: "treadmill", name: "Treadmill", he: "הליכון", group: "Cardio", alt: "run ריצה" },
+  { id: "rowingmachine", name: "Rowing Machine", he: "מכונת חתירה", group: "Cardio", alt: "erg row" },
+  { id: "stationarybike", name: "Stationary Bike", he: "אופני כושר", group: "Cardio", alt: "cycling spinning" },
+  { id: "elliptical", name: "Elliptical", he: "אליפטיקל", group: "Cardio" },
+  { id: "stairclimber", name: "Stair Climber", he: "מכונת מדרגות", group: "Cardio" },
+  { id: "jumprope", name: "Jump Rope", he: "קפיצה בחבל", group: "Cardio", alt: "skipping" },
+  { id: "assaultbike", name: "Assault Bike", he: "אופני אסולט", group: "Cardio", alt: "air bike" },
+  // Full body / functional
+  { id: "burpee", name: "Burpees", he: "ברפיז", group: "Full Body" },
+  { id: "kbswing", name: "Kettlebell Swing", he: "נדנוד קטלבל", group: "Full Body", alt: "kettle bell" },
+  { id: "cleanandpress", name: "Clean and Press", he: "קלין אנד פרס", group: "Full Body" },
+  { id: "powerclean", name: "Power Clean", he: "פאוור קלין", group: "Full Body" },
+  { id: "snatch", name: "Snatch", he: "סנאץ'", group: "Full Body", alt: "הנפה" },
+  { id: "thruster", name: "Thruster", he: "ת'ראסטר", group: "Full Body" },
+  { id: "battleropes", name: "Battle Ropes", he: "חבלי קרב", group: "Full Body" },
+  { id: "sledpush", name: "Sled Push", he: "דחיפת מזחלת", group: "Full Body", alt: "prowler" },
+  { id: "medballslam", name: "Medicine Ball Slam", he: "הטחת כדור כוח", group: "Full Body" },
+];
+const gymById = (id) => GYM_EXERCISES.find((e) => e.id === id);
+
+// ---- Fuzzy search (English + Hebrew) ----
+// Normalization: lowercase, strip niqqud, fold Hebrew final letters, drop
+// punctuation — so "לחיצת-חזה" matches "לחיצת חזה" and "bnch" matches "bench".
+const HEB_FINALS = { "ך": "כ", "ם": "מ", "ן": "נ", "ף": "פ", "ץ": "צ" };
+const normalizeSearch = (s) =>
+  (s || "")
+    .toLowerCase()
+    .replace(/[֑-ׇ]/g, "")
+    .replace(/[ךםןףץ]/g, (c) => HEB_FINALS[c])
+    .replace(/[^a-z0-9א-ת]+/g, " ")
+    .trim();
+
+// Precomputed haystack per exercise: English + Hebrew names, aliases, group.
+GYM_EXERCISES.forEach((ex) => {
+  ex.search = normalizeSearch(
+    ex.name + " " + ex.he + " " + (ex.alt || "") + " " + ex.group + " " + (GYM_GROUP_HE[ex.group] || "")
+  );
+});
+
+function editDistCapped(a, b, cap) {
+  if (Math.abs(a.length - b.length) > cap) return cap + 1;
+  let prev = [];
+  for (let j = 0; j <= b.length; j++) prev[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (cur[j] < rowMin) rowMin = cur[j];
+    }
+    if (rowMin > cap) return cap + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+const isSubseq = (q, t) => {
+  let i = 0;
+  for (let j = 0; j < t.length && i < q.length; j++) if (t[j] === q[i]) i++;
+  return i === q.length;
+};
+
+// Score a query against a normalized haystack. 0 = no match. Every query
+// token must match some word (exact / prefix / substring / ≤2 typos /
+// subsequence); whole-phrase substring matches rank highest.
+function fuzzyScore(query, hay) {
+  const q = normalizeSearch(query);
+  if (!q) return 0;
+  const idx = hay.indexOf(q);
+  if (idx !== -1) return 1000 - idx * 2 - hay.length * 0.1;
+  const qc = q.replace(/ /g, "");
+  if (qc.length >= 3) {
+    const ci = hay.replace(/ /g, "").indexOf(qc);
+    if (ci !== -1) return 800 - ci * 2;
+  }
+  const words = hay.split(" ");
+  let total = 0;
+  for (const tok of q.split(" ")) {
+    let best = 0;
+    for (const w of words) {
+      let s = 0;
+      if (w === tok) s = 100;
+      else if (w.indexOf(tok) === 0) s = 80;
+      else if (tok.length >= 3 && w.indexOf(tok) !== -1) s = 60;
+      else if (tok.length >= 4) {
+        const cap = tok.length >= 7 ? 2 : 1;
+        const d = Math.min(
+          editDistCapped(tok, w, cap),
+          editDistCapped(tok, w.slice(0, Math.min(w.length, tok.length + 1)), cap)
+        );
+        if (d <= cap) s = 55 - d * 15;
+        else if (tok.length >= 5 && isSubseq(tok, w)) s = 25;
+      }
+      if (s > best) best = s;
+    }
+    if (best === 0) return 0;
+    total += best;
+  }
+  return total;
+}
+
 // ==== FIREBASE CONFIG ======================================================
 // Web-app config from the Firebase console (Project settings → Your apps →
 // SDK setup and configuration → Config). This config is a public identifier,
@@ -321,7 +554,7 @@ const THEME = {
   done: { bg: "#111827", accent: "#FDE68A", label: "DONE" },
 };
 
-function AbsWorkoutTimer() {
+function AbsWorkoutTimer({ onOpenGym }) {
   // ---- Setup flow: home (pick preset) → preview → edit ----
   const [setupView, setSetupView] = useState("home");
   const [workout, setWorkout] = useState(() => withUids(BUILTIN_PRESETS[0].exercises));
@@ -943,6 +1176,14 @@ function AbsWorkoutTimer() {
             })}
           </div>
 
+          <div style={styles.gymNavCard} onClick={onOpenGym}>
+            <div style={{ flex: 1 }}>
+              <div style={styles.presetCardName}>🏋️ Gym Log</div>
+              <div style={styles.presetCardMeta}>Track exercises, weights & sessions</div>
+            </div>
+            <span style={styles.presetArrow}>›</span>
+          </div>
+
           {firebaseReady && !user && (
             <div style={styles.signInHint}>
               Sign in with Google to sync your presets across devices.
@@ -1357,6 +1598,511 @@ function AbsWorkoutTimer() {
         </button>
       </div>
     </div>
+  );
+}
+
+// ---- Gym tracker page ----
+// Log gym sessions: fuzzy-search the catalog (EN/HE), record weight × reps
+// per set, and keep a timestamped session history. The in-progress session is
+// persisted under GYM_ACTIVE_KEY so a reload doesn't lose it; set inputs are
+// kept as raw strings while typing and parsed to numbers on finish.
+const parseNum = (s) => {
+  const n = parseFloat(String(s).replace(",", "."));
+  return isFinite(n) && n >= 0 ? n : null;
+};
+
+const fmtSessionDate = (iso) => {
+  try {
+    const d = new Date(iso);
+    const opts = { weekday: "short", month: "short", day: "numeric" };
+    if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
+    return (
+      d.toLocaleDateString(undefined, opts) +
+      " · " +
+      d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+    );
+  } catch (e) {
+    return iso;
+  }
+};
+
+const fmtSet = (st) =>
+  st.weight != null && st.reps != null
+    ? `${st.weight}kg × ${st.reps}`
+    : st.weight != null
+    ? `${st.weight}kg`
+    : `× ${st.reps}`;
+
+function GymTracker({ onBack }) {
+  const [loaded, setLoaded] = useState(false);
+  const [sessions, setSessions] = useState([]);
+  const [weights, setWeights] = useState({}); // exId → { weight, reps, at }
+  const [active, setActive] = useState(null); // in-progress session
+  const [view, setView] = useState("home"); // home | session
+  const [query, setQuery] = useState("");
+  const [groupFilter, setGroupFilter] = useState(null); // browse-by-group when not searching
+  const [openSessionId, setOpenSessionId] = useState(null); // expanded history card
+  const [confirmAction, setConfirmAction] = useState(null); // { type: "deleteSession"|"discard", ... }
+  const saveTimer = useRef(null);
+
+  // Load everything through the store (cloud when signed in, else local).
+  useEffect(() => {
+    let cancelled = false;
+    const parse = (raw, fallback) => {
+      try {
+        const v = JSON.parse(raw);
+        return v == null ? fallback : v;
+      } catch (e) {
+        return fallback;
+      }
+    };
+    (async () => {
+      const [s, w, a] = await Promise.all([
+        store.get(GYM_SESSIONS_KEY),
+        store.get(GYM_WEIGHTS_KEY),
+        store.get(GYM_ACTIVE_KEY),
+      ]);
+      if (cancelled) return;
+      const sess = parse(s, []);
+      setSessions(Array.isArray(sess) ? sess : []);
+      const wm = parse(w, {});
+      setWeights(wm && typeof wm === "object" && !Array.isArray(wm) ? wm : {});
+      const act = parse(a, null);
+      if (act && Array.isArray(act.entries)) setActive(act);
+      setLoaded(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Debounce active-session writes: every keystroke updates state, but the
+  // store (and Firestore, when signed in) only sees one write per pause.
+  // pendingRef holds a value scheduled but not yet written (undefined = none),
+  // so it can be flushed if the page hides or the component unmounts mid-wait.
+  const pendingRef = useRef(undefined);
+  const persistActive = (a) => {
+    setActive(a);
+    pendingRef.current = a;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      pendingRef.current = undefined;
+      store.set(GYM_ACTIVE_KEY, JSON.stringify(a));
+    }, 600);
+  };
+  const persistActiveNow = (a) => {
+    setActive(a);
+    pendingRef.current = undefined;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    store.set(GYM_ACTIVE_KEY, JSON.stringify(a));
+  };
+
+  useEffect(() => {
+    const flush = () => {
+      if (pendingRef.current === undefined) return;
+      const a = pendingRef.current;
+      pendingRef.current = undefined;
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      store.set(GYM_ACTIVE_KEY, JSON.stringify(a));
+    };
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, []);
+
+  const startSession = () => {
+    persistActiveNow({ id: `s-${Date.now()}`, startedAt: new Date().toISOString(), entries: [] });
+    setQuery("");
+    setGroupFilter(null);
+    setView("session");
+  };
+
+  const addExercise = (exId) => {
+    const last = weights[exId];
+    const entry = {
+      uid: `g${uidCounter++}`,
+      exId,
+      sets: [
+        {
+          uid: `g${uidCounter++}`,
+          weight: last && last.weight != null ? String(last.weight) : "",
+          reps: last && last.reps != null ? String(last.reps) : "",
+        },
+      ],
+    };
+    persistActive({ ...active, entries: [...active.entries, entry] });
+    setQuery("");
+  };
+
+  const removeEntry = (uid) =>
+    persistActive({ ...active, entries: active.entries.filter((en) => en.uid !== uid) });
+
+  const addSet = (entryUid) =>
+    persistActive({
+      ...active,
+      entries: active.entries.map((en) => {
+        if (en.uid !== entryUid) return en;
+        const prev = en.sets[en.sets.length - 1];
+        return {
+          ...en,
+          sets: [
+            ...en.sets,
+            { uid: `g${uidCounter++}`, weight: prev ? prev.weight : "", reps: prev ? prev.reps : "" },
+          ],
+        };
+      }),
+    });
+
+  const removeSet = (entryUid, setUid) =>
+    persistActive({
+      ...active,
+      entries: active.entries.map((en) =>
+        en.uid === entryUid ? { ...en, sets: en.sets.filter((st) => st.uid !== setUid) } : en
+      ),
+    });
+
+  const updateSet = (entryUid, setUid, field, value) =>
+    persistActive({
+      ...active,
+      entries: active.entries.map((en) =>
+        en.uid === entryUid
+          ? {
+              ...en,
+              sets: en.sets.map((st) =>
+                st.uid === setUid ? { ...st, [field]: value.replace(/[^0-9.,]/g, "") } : st
+              ),
+            }
+          : en
+      ),
+    });
+
+  const hasLoggedSet =
+    active &&
+    active.entries.some((en) =>
+      en.sets.some((st) => parseNum(st.weight) != null || parseNum(st.reps) != null)
+    );
+
+  const finishSession = () => {
+    const entries = active.entries
+      .map((en) => ({
+        exId: en.exId,
+        sets: en.sets
+          .map((st) => ({ weight: parseNum(st.weight), reps: parseNum(st.reps) }))
+          .filter((st) => st.weight != null || st.reps != null),
+      }))
+      .filter((en) => en.sets.length > 0);
+    if (entries.length === 0) return;
+    const session = {
+      id: active.id,
+      startedAt: active.startedAt,
+      endedAt: new Date().toISOString(),
+      entries,
+    };
+    const nextSessions = [session, ...sessions];
+    // Record the last weight used per exercise (last set that has a weight).
+    const nextWeights = { ...weights };
+    entries.forEach((en) => {
+      const withWeight = en.sets.filter((st) => st.weight != null);
+      const last = withWeight[withWeight.length - 1];
+      if (last) nextWeights[en.exId] = { weight: last.weight, reps: last.reps, at: session.endedAt };
+    });
+    setSessions(nextSessions);
+    setWeights(nextWeights);
+    store.set(GYM_SESSIONS_KEY, JSON.stringify(nextSessions));
+    store.set(GYM_WEIGHTS_KEY, JSON.stringify(nextWeights));
+    persistActiveNow(null);
+    setOpenSessionId(session.id);
+    setView("home");
+  };
+
+  const discardSession = () => {
+    persistActiveNow(null);
+    setView("home");
+  };
+
+  const deleteSession = (id) => {
+    const next = sessions.filter((s) => s.id !== id);
+    setSessions(next);
+    store.set(GYM_SESSIONS_KEY, JSON.stringify(next));
+  };
+
+  const results = query.trim()
+    ? GYM_EXERCISES.map((ex) => ({ ex, score: fuzzyScore(query, ex.search) }))
+        .filter((r) => r.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 25)
+        .map((r) => r.ex)
+    : groupFilter
+    ? GYM_EXERCISES.filter((ex) => ex.group === groupFilter)
+    : [];
+
+  const lastHint = (exId) => {
+    const w = weights[exId];
+    if (!w || w.weight == null) return null;
+    return w.reps != null ? `${w.weight}kg × ${w.reps}` : `${w.weight}kg`;
+  };
+
+  const confirmOverlay = confirmAction && (
+    <div style={styles.confirmOverlay} onClick={() => setConfirmAction(null)}>
+      <div style={styles.confirmBox} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.confirmTitle}>
+          {confirmAction.type === "discard" ? "Discard session?" : "Delete session?"}
+        </div>
+        <div style={styles.confirmText}>
+          {confirmAction.type === "discard"
+            ? "This gym session won't be saved."
+            : `The session from ${confirmAction.label} will be removed. This can't be undone.`}
+        </div>
+        <div style={styles.confirmActions}>
+          <button style={styles.confirmCancel} onClick={() => setConfirmAction(null)}>
+            Cancel
+          </button>
+          <button
+            style={styles.confirmDeleteBtn}
+            onClick={() => {
+              if (confirmAction.type === "discard") discardSession();
+              else deleteSession(confirmAction.id);
+              setConfirmAction(null);
+            }}
+          >
+            {confirmAction.type === "discard" ? "Discard" : "Delete"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ================= ACTIVE GYM SESSION =================
+  if (view === "session" && active) {
+    return (
+      <div style={{ ...styles.screen, background: "#0F1520" }}>
+        <div style={styles.setupWrap}>
+          <button onClick={() => setView("home")} style={styles.backLink}>
+            ‹ Gym log
+          </button>
+          <h1 style={{ ...styles.setupTitle, marginBottom: 6 }}>Session in progress</h1>
+          <div style={styles.previewMeta}>Started {fmtSessionDate(active.startedAt)}</div>
+
+          {active.entries.length > 0 && <div style={styles.sectionLabel}>EXERCISES</div>}
+          {active.entries.map((en) => {
+            const ex = gymById(en.exId);
+            if (!ex) return null;
+            const hint = lastHint(en.exId);
+            return (
+              <div key={en.uid} style={styles.gymEntryCard}>
+                <div style={styles.gymEntryHead}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={styles.gymEntryName}>{ex.name}</div>
+                    <div style={styles.gymEntryHe} dir="auto">
+                      {ex.he}
+                      {hint && <span style={styles.gymLastHint}> · last: {hint}</span>}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => removeEntry(en.uid)}
+                    style={styles.removeBtn}
+                    aria-label={`Remove ${ex.name}`}
+                  >
+                    ×
+                  </button>
+                </div>
+                {en.sets.map((st, i) => (
+                  <div key={st.uid} style={styles.gymSetRow}>
+                    <span style={styles.gymSetIndex}>{i + 1}</span>
+                    <input
+                      value={st.weight}
+                      onChange={(e) => updateSet(en.uid, st.uid, "weight", e.target.value)}
+                      placeholder="kg"
+                      inputMode="decimal"
+                      style={styles.gymSetInput}
+                      aria-label={`${ex.name} set ${i + 1} weight`}
+                    />
+                    <span style={styles.gymSetSep}>kg ×</span>
+                    <input
+                      value={st.reps}
+                      onChange={(e) => updateSet(en.uid, st.uid, "reps", e.target.value)}
+                      placeholder="reps"
+                      inputMode="numeric"
+                      style={styles.gymSetInput}
+                      aria-label={`${ex.name} set ${i + 1} reps`}
+                    />
+                    <span style={styles.gymSetSep}>reps</span>
+                    <button
+                      onClick={() => removeSet(en.uid, st.uid)}
+                      style={{ ...styles.removeBtn, fontSize: 18 }}
+                      aria-label={`Remove set ${i + 1}`}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                <button onClick={() => addSet(en.uid)} style={styles.gymAddSetBtn}>
+                  + Add set
+                </button>
+              </div>
+            );
+          })}
+
+          <div style={styles.sectionLabel}>ADD EXERCISE</div>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search… / חיפוש תרגיל…"
+            dir="auto"
+            style={styles.gymSearchInput}
+          />
+          {!query.trim() && (
+            <div style={styles.gymGroupChips}>
+              {GYM_GROUPS.map((g) => (
+                <button
+                  key={g}
+                  onClick={() => setGroupFilter(groupFilter === g ? null : g)}
+                  style={{
+                    ...styles.gymGroupChip,
+                    borderColor: groupFilter === g ? "#5B8DEF" : "#3B4A63",
+                    color: groupFilter === g ? "#5B8DEF" : "#8FA3BF",
+                  }}
+                >
+                  {g} · {GYM_GROUP_HE[g]}
+                </button>
+              ))}
+            </div>
+          )}
+          {query.trim() && results.length === 0 && (
+            <div style={styles.gymEmptyText}>No exercises match "{query.trim()}".</div>
+          )}
+          {results.length > 0 && (
+            <div style={{ ...styles.exList, marginTop: 10 }}>
+              {results.map((ex) => {
+                const hint = lastHint(ex.id);
+                return (
+                  <div key={ex.id} style={styles.gymResultRow} onClick={() => addExercise(ex.id)}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={styles.gymResultName}>{ex.name}</div>
+                      <div style={styles.gymEntryHe} dir="auto">
+                        {ex.he} · {ex.group}
+                      </div>
+                    </div>
+                    {hint && <span style={styles.gymLastBadge}>{hint}</span>}
+                    <span style={{ ...styles.presetArrow, fontSize: 22 }}>+</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <button
+            onClick={finishSession}
+            disabled={!hasLoggedSet}
+            style={{ ...styles.startBtn, opacity: hasLoggedSet ? 1 : 0.4 }}
+          >
+            FINISH SESSION
+          </button>
+          <button onClick={() => setConfirmAction({ type: "discard" })} style={styles.editBtn}>
+            Discard session
+          </button>
+        </div>
+        {confirmOverlay}
+      </div>
+    );
+  }
+
+  // ================= GYM HOME: START + HISTORY =================
+  return (
+    <div style={{ ...styles.screen, background: "#0F1520" }}>
+      <div style={styles.setupWrap}>
+        <button onClick={onBack} style={styles.backLink}>
+          ‹ Timer
+        </button>
+        <div style={styles.eyebrow}>GYM LOG</div>
+        <h1 style={styles.setupTitle}>Track your lifts.</h1>
+
+        <button onClick={active ? () => setView("session") : startSession} style={styles.startBtn}>
+          {active ? "RESUME SESSION" : "START GYM SESSION"}
+        </button>
+        {active && (
+          <div style={styles.gymActiveHint}>
+            In progress — started {fmtSessionDate(active.startedAt)}
+          </div>
+        )}
+
+        <div style={styles.sectionLabel}>HISTORY</div>
+        {loaded && sessions.length === 0 && (
+          <div style={styles.gymEmptyText}>
+            No sessions yet. Start one and it'll show up here with its date and weights.
+          </div>
+        )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {sessions.map((s) => {
+            const totalSets = s.entries.reduce((a, en) => a + en.sets.length, 0);
+            const open = openSessionId === s.id;
+            return (
+              <div key={s.id} style={styles.gymHistoryCard}>
+                <div
+                  style={styles.gymHistoryHead}
+                  onClick={() => setOpenSessionId(open ? null : s.id)}
+                >
+                  <div style={{ flex: 1 }}>
+                    <div style={styles.gymHistoryDate}>{fmtSessionDate(s.startedAt)}</div>
+                    <div style={styles.presetCardMeta}>
+                      {s.entries.length} exercise{s.entries.length !== 1 ? "s" : ""} · {totalSets}{" "}
+                      set{totalSets !== 1 ? "s" : ""}
+                    </div>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirmAction({
+                        type: "deleteSession",
+                        id: s.id,
+                        label: fmtSessionDate(s.startedAt),
+                      });
+                    }}
+                    style={styles.cardDelete}
+                    aria-label="Delete session"
+                  >
+                    ×
+                  </button>
+                  <span style={styles.presetArrow}>{open ? "▾" : "›"}</span>
+                </div>
+                {open &&
+                  s.entries.map((en, i) => {
+                    const ex = gymById(en.exId);
+                    return (
+                      <div key={i} style={styles.gymHistoryEx}>
+                        <div style={styles.gymHistoryExName}>
+                          {ex ? ex.name : en.exId}
+                          {ex && (
+                            <span style={{ ...styles.gymEntryHe, marginLeft: 8 }} dir="auto">
+                              {ex.he}
+                            </span>
+                          )}
+                        </div>
+                        <div style={styles.gymHistorySets}>
+                          {en.sets.map((st) => fmtSet(st)).join("  ·  ")}
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      {confirmOverlay}
+    </div>
+  );
+}
+
+// ---- Root: timer ⇄ gym tracker ----
+function App() {
+  const [page, setPage] = useState("timer");
+  return page === "gym" ? (
+    <GymTracker onBack={() => setPage("timer")} />
+  ) : (
+    <AbsWorkoutTimer onOpenGym={() => setPage("gym")} />
   );
 }
 
@@ -1916,8 +2662,128 @@ const styles = {
     fontWeight: 700,
     cursor: "pointer",
   },
+  // ---- Gym tracker ----
+  gymNavCard: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    padding: "18px 18px",
+    borderRadius: 16,
+    border: "2px solid #2B3B5C",
+    background: "#121A2C",
+    cursor: "pointer",
+    marginTop: 18,
+  },
+  gymActiveHint: { marginTop: 10, fontSize: 13, fontWeight: 600, color: "#6EE7B7" },
+  gymEmptyText: { padding: "14px 0", color: "#8FA3BF", fontSize: 14, lineHeight: 1.5 },
+  gymSearchInput: {
+    width: "100%",
+    padding: "13px 14px",
+    borderRadius: 12,
+    border: "2px solid #3B4A63",
+    background: "#161F30",
+    color: "#fff",
+    fontSize: 16,
+    outline: "none",
+    boxSizing: "border-box",
+  },
+  gymGroupChips: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 },
+  gymGroupChip: {
+    padding: "7px 12px",
+    borderRadius: 999,
+    border: "1px solid #3B4A63",
+    background: "#161F30",
+    fontSize: 13,
+    fontWeight: 600,
+    fontFamily: "inherit",
+    cursor: "pointer",
+  },
+  gymResultRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    padding: "12px 4px",
+    borderBottom: "1px solid #26324A",
+    cursor: "pointer",
+  },
+  gymResultName: { fontSize: 15, fontWeight: 700 },
+  gymLastBadge: {
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#6EE7B7",
+    border: "1px solid #2E4A3F",
+    borderRadius: 8,
+    padding: "3px 8px",
+    whiteSpace: "nowrap",
+    fontVariantNumeric: "tabular-nums",
+    flexShrink: 0,
+  },
+  gymEntryCard: {
+    borderRadius: 14,
+    border: "1px solid #26324A",
+    background: "#141C2C",
+    padding: "14px 14px 12px",
+    marginBottom: 12,
+  },
+  gymEntryHead: { display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 8 },
+  gymEntryName: { fontSize: 16, fontWeight: 800 },
+  gymEntryHe: { fontSize: 13, color: "#8FA3BF", fontWeight: 500, marginTop: 2 },
+  gymLastHint: { color: "#6EE7B7", fontVariantNumeric: "tabular-nums" },
+  gymSetRow: { display: "flex", alignItems: "center", gap: 8, padding: "5px 0" },
+  gymSetIndex: {
+    width: 20,
+    fontSize: 13,
+    fontWeight: 800,
+    color: "#5B8DEF",
+    fontVariantNumeric: "tabular-nums",
+  },
+  gymSetInput: {
+    width: 64,
+    padding: "9px 8px",
+    borderRadius: 10,
+    border: "1.5px solid #3B4A63",
+    background: "#161F30",
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: 700,
+    textAlign: "center",
+    outline: "none",
+    fontVariantNumeric: "tabular-nums",
+    boxSizing: "border-box",
+  },
+  gymSetSep: { fontSize: 13, color: "#8FA3BF", fontWeight: 600 },
+  gymAddSetBtn: {
+    marginTop: 8,
+    padding: "8px 14px",
+    borderRadius: 10,
+    border: "1.5px dashed #3B4A63",
+    background: "transparent",
+    color: "#8FA3BF",
+    fontSize: 13,
+    fontWeight: 700,
+    fontFamily: "inherit",
+    cursor: "pointer",
+  },
+  gymHistoryCard: {
+    borderRadius: 16,
+    border: "2px solid #26324A",
+    background: "#141C2C",
+    padding: "16px 18px",
+  },
+  gymHistoryHead: { display: "flex", alignItems: "center", gap: 12, cursor: "pointer" },
+  gymHistoryDate: { fontSize: 16, fontWeight: 800, marginBottom: 4 },
+  gymHistoryEx: { marginTop: 12, paddingTop: 10, borderTop: "1px solid #26324A" },
+  gymHistoryExName: { fontSize: 14, fontWeight: 700 },
+  gymHistorySets: {
+    marginTop: 4,
+    fontSize: 13,
+    color: "#B9C6DB",
+    fontWeight: 600,
+    fontVariantNumeric: "tabular-nums",
+    lineHeight: 1.6,
+  },
 };
-    ReactDOM.createRoot(document.getElementById("root")).render(<AbsWorkoutTimer />);
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
   </script>
 </body>
 </html>
