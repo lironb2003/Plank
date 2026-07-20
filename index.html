@@ -580,6 +580,27 @@ function SkeletonCard({ delay = 0 }) {
   );
 }
 
+// ---- Header home button (icon) ----
+function HomeButton({ onClick }) {
+  return (
+    <button onClick={onClick} style={styles.homeBtn} aria-label="Home">
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M3 11l9-8 9 8" />
+        <path d="M5 9.8V21h14V9.8" />
+      </svg>
+    </button>
+  );
+}
+
 function AbsWorkoutTimer({ onHome }) {
   // ---- Setup flow: home (pick preset) → preview → edit ----
   const [setupView, setSetupView] = useState("home");
@@ -1094,10 +1115,8 @@ function AbsWorkoutTimer({ onHome }) {
     return (
       <div style={{ ...styles.screen, background: "#0F1520" }}>
         <div style={styles.setupWrap}>
-          <div style={styles.homeTopBar}>
-            <button onClick={onHome} style={styles.homeBtn}>
-              ‹ Home
-            </button>
+          <div style={styles.pageHeader}>
+            <HomeButton onClick={onHome} />
             {firebaseReady && (
               <div style={styles.accountMenuWrap}>
                 {user ? (
@@ -1167,7 +1186,7 @@ function AbsWorkoutTimer({ onHome }) {
           <div style={styles.eyebrow}>ABS CIRCUIT</div>
           <h1 style={styles.setupTitle}>Pick your workout.</h1>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 24 }}>
             {(presetsLoaded ? allPresets : BUILTIN_PRESETS).map((p) => {
               const exs = p.exercises.map(resolveEntry).filter(Boolean);
               const mins = Math.max(
@@ -1255,10 +1274,12 @@ function AbsWorkoutTimer({ onHome }) {
     return (
       <div style={{ ...styles.screen, background: "#0F1520" }}>
         <div style={styles.setupWrap}>
-          <button onClick={() => setSetupView("home")} style={styles.backLink}>
-            ‹ All workouts
-          </button>
-          <h1 style={{ ...styles.setupTitle, marginBottom: 6 }}>
+          <div style={styles.pageHeader}>
+            <button onClick={() => setSetupView("home")} style={styles.backLink}>
+              ‹ All workouts
+            </button>
+          </div>
+          <h1 style={styles.setupTitle}>
             {selectedName}
             {edited && <span style={styles.editedTag}> · edited</span>}
           </h1>
@@ -1267,7 +1288,7 @@ function AbsWorkoutTimer({ onHome }) {
           </div>
           <div style={styles.previewHint}>Tap an exercise to see how it's done</div>
 
-          <div style={{ ...styles.exList, marginTop: 20 }}>
+          <div style={{ ...styles.exList, marginTop: 24 }}>
             {exercises.map((ex, i) => (
               <React.Fragment key={ex.uid}>
                 <div
@@ -1323,10 +1344,12 @@ function AbsWorkoutTimer({ onHome }) {
     return (
       <div style={{ ...styles.screen, background: "#0F1520" }}>
         <div style={styles.setupWrap}>
-          <button onClick={() => setSetupView("preview")} style={styles.backLink}>
-            ‹ Done editing
-          </button>
-          <h1 style={{ ...styles.setupTitle, marginBottom: 6 }}>Edit workout</h1>
+          <div style={styles.pageHeader}>
+            <button onClick={() => setSetupView("preview")} style={styles.backLink}>
+              ‹ Done editing
+            </button>
+          </div>
+          <h1 style={styles.setupTitle}>Edit workout</h1>
           <div style={styles.previewMeta}>
             Hold ⠿ and drag to reorder · − / + to adjust time · tap × to remove
           </div>
@@ -1910,10 +1933,12 @@ function GymTracker({ onHome }) {
     return (
       <div style={{ ...styles.screen, background: "#0F1520" }}>
         <div style={styles.setupWrap}>
-          <button onClick={() => setView("home")} style={styles.backLink}>
-            ‹ Gym log
-          </button>
-          <h1 style={{ ...styles.setupTitle, marginBottom: 6 }}>Session in progress</h1>
+          <div style={styles.pageHeader}>
+            <button onClick={() => setView("home")} style={styles.backLink}>
+              ‹ Gym log
+            </button>
+          </div>
+          <h1 style={styles.setupTitle}>Session in progress</h1>
           <div style={styles.previewMeta}>Started {fmtSessionDate(active.startedAt)}</div>
 
           {active.entries.length > 0 && <div style={styles.sectionLabel}>EXERCISES</div>}
@@ -2044,9 +2069,9 @@ function GymTracker({ onHome }) {
   return (
     <div style={{ ...styles.screen, background: "#0F1520" }}>
       <div style={styles.setupWrap}>
-        <button onClick={onHome} style={{ ...styles.homeBtn, alignSelf: "flex-start", paddingBottom: 20 }}>
-          ‹ Home
-        </button>
+        <div style={styles.pageHeader}>
+          <HomeButton onClick={onHome} />
+        </div>
         <div style={styles.eyebrow}>GYM LOG</div>
         <h1 style={styles.setupTitle}>Track your lifts.</h1>
 
@@ -2054,7 +2079,7 @@ function GymTracker({ onHome }) {
           <React.Fragment>
             <button
               onClick={active ? () => setView("session") : startSession}
-              style={styles.startBtn}
+              style={{ ...styles.startBtn, marginTop: 24 }}
             >
               {active ? "RESUME SESSION" : "START GYM SESSION"}
             </button>
@@ -2065,7 +2090,7 @@ function GymTracker({ onHome }) {
             )}
           </React.Fragment>
         ) : (
-          <Skeleton h={62} r={16} style={{ marginTop: 28 }} />
+          <Skeleton h={62} r={16} style={{ marginTop: 24 }} />
         )}
 
         <div style={styles.sectionLabel}>HISTORY</div>
@@ -2150,7 +2175,7 @@ function HomePage({ onOpenTimer, onOpenGym }) {
       <div style={styles.setupWrap}>
         <div style={styles.eyebrow}>WORKOUT</div>
         <h1 style={styles.setupTitle}>What are we training today?</h1>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 24 }}>
           <div style={styles.homeNavCard} onClick={onOpenTimer}>
             <span style={styles.homeNavEmoji}>⏱️</span>
             <div style={{ flex: 1 }}>
@@ -2242,20 +2267,22 @@ const styles = {
     lineHeight: 1.05,
     fontWeight: 800,
     letterSpacing: "-0.02em",
-    margin: "0 0 24px",
+    margin: 0,
   },
   backLink: {
-    alignSelf: "flex-start",
-    background: "none",
-    border: "none",
+    padding: "8px 14px",
+    borderRadius: 10,
+    border: "1.5px solid #26324A",
+    background: "#141C2C",
     color: "#5B8DEF",
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: 700,
+    fontFamily: "inherit",
     cursor: "pointer",
-    padding: "0 0 20px",
+    whiteSpace: "nowrap",
   },
   editedTag: { fontSize: 16, fontWeight: 600, color: "#5B8DEF", verticalAlign: "middle" },
-  previewMeta: { fontSize: 15, color: "#8FA3BF", fontWeight: 500 },
+  previewMeta: { fontSize: 15, color: "#8FA3BF", fontWeight: 500, marginTop: 6 },
   previewHint: { fontSize: 13, color: "#5B8DEF", fontWeight: 600, marginTop: 6 },
   infoIcon: { fontSize: 13, color: "#5B8DEF", marginLeft: 8, fontWeight: 400 },
   descBox: {
@@ -2295,12 +2322,13 @@ const styles = {
   },
   presetCardMeta: { fontSize: 13, color: "#8FA3BF", fontWeight: 500 },
   presetArrow: { fontSize: 28, color: "#5B8DEF", fontWeight: 400 },
-  homeTopBar: {
+  pageHeader: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
-    marginBottom: 10,
+    minHeight: 40,
+    marginBottom: 20,
   },
   accountMenuWrap: { position: "relative", flexShrink: 0, zIndex: 20 },
   accountBtn: {
@@ -2748,14 +2776,18 @@ const styles = {
   },
   // ---- Landing page / header nav ----
   homeBtn: {
-    background: "none",
-    border: "none",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    border: "1.5px solid #26324A",
+    background: "#141C2C",
     color: "#5B8DEF",
-    fontSize: 16,
-    fontWeight: 700,
-    fontFamily: "inherit",
     cursor: "pointer",
     padding: 0,
+    flexShrink: 0,
   },
   homeNavCard: {
     display: "flex",
