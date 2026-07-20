@@ -601,7 +601,7 @@ function HomeButton({ onClick }) {
   );
 }
 
-function AbsWorkoutTimer({ onHome }) {
+function AbsWorkoutTimer({ onHome, user, authReady, onSyncState }) {
   // ---- Setup flow: home (pick preset) → preview → edit ----
   const [setupView, setSetupView] = useState("home");
   const [workout, setWorkout] = useState(() => withUids(BUILTIN_PRESETS[0].exercises));
@@ -619,11 +619,6 @@ function AbsWorkoutTimer({ onHome }) {
   const [infoUid, setInfoUid] = useState(null); // preview: expanded description row
   const [libInfoId, setLibInfoId] = useState(null); // edit: library exercise info
 
-  // ---- Account / cloud sync state ----
-  const [user, setUser] = useState(null);
-  const [authReady, setAuthReady] = useState(!firebaseReady); // no firebase => nothing to wait for
-  const [syncState, setSyncState] = useState("idle"); // idle | syncing | synced | error
-  const [menuOpen, setMenuOpen] = useState(false); // account dropdown (home, top-right)
   const [confirmDelete, setConfirmDelete] = useState(null); // { id, name } awaiting confirmation
 
   // ---- Drag state (commit on drop) ----
@@ -656,41 +651,16 @@ function AbsWorkoutTimer({ onHome }) {
 
   const isCustomSelected = customPresets.some((p) => p.id === selectedId);
 
-  // ---- Auth subscription + sync notifications ----
-  useEffect(() => {
-    store.notify = (s) => setSyncState(s);
-    if (!firebaseReady) {
-      return () => {
-        store.notify = null;
-      };
-    }
-    let unsub = null;
-    try {
-      unsub = firebase.auth().onAuthStateChanged(
-        (u) => {
-          setUser(u);
-          setMenuOpen(false); // menu belongs to the previous auth state
-          setAuthReady(true);
-        },
-        () => setAuthReady(true)
-      );
-    } catch (e) {
-      setAuthReady(true);
-    }
-    return () => {
-      store.notify = null;
-      if (unsub) unsub();
-    };
-  }, []);
-
   // ---- Load saved presets (re-runs when the signed-in user changes) ----
+  // Auth itself lives in App; this page only consumes user/authReady and
+  // reports sync progress up via onSyncState.
   useEffect(() => {
     if (!authReady) return;
     let cancelled = false;
     setPresetsLoaded(false); // re-runs on sign-in/out: show skeletons while refetching
     (async () => {
       try {
-        if (user) setSyncState("syncing");
+        if (user) onSyncState("syncing");
         let presets;
         if (user) {
           presets = await loadPresetsForUser(user.uid); // includes one-time merge
@@ -702,7 +672,7 @@ function AbsWorkoutTimer({ onHome }) {
           setCustomPresets(presets);
           setPresetsLoaded(true);
           setConfirmDelete(null); // pending confirmation may target a preset gone after reload
-          if (user) setSyncState("synced");
+          if (user) onSyncState("synced");
         }
       } catch (e) {
         if (!cancelled) {
@@ -711,7 +681,7 @@ function AbsWorkoutTimer({ onHome }) {
             setConfirmDelete(null);
           }
           setPresetsLoaded(true);
-          if (user) setSyncState(e && e.code === "permission-denied" ? "denied" : "error");
+          if (user) onSyncState(e && e.code === "permission-denied" ? "denied" : "error");
         }
       }
     })();
@@ -719,39 +689,6 @@ function AbsWorkoutTimer({ onHome }) {
       cancelled = true;
     };
   }, [authReady, user ? user.uid : null]);
-
-  const signIn = async () => {
-    try {
-      const provider = new firebase.auth.GoogleAuthProvider();
-      try {
-        await firebase.auth().signInWithPopup(provider);
-      } catch (e) {
-        // Popup blocked (common on mobile) → best-effort redirect fallback.
-        // Note: redirect with the default *.firebaseapp.com authDomain is
-        // degraded by third-party-cookie blocking in some browsers; popup is
-        // the primary path. A user closing the popup is not an error.
-        if (
-          e &&
-          (e.code === "auth/popup-blocked" ||
-            e.code === "auth/operation-not-supported-in-this-environment")
-        ) {
-          await firebase.auth().signInWithRedirect(provider);
-        } else if (!e || e.code !== "auth/popup-closed-by-user") {
-          setSyncState("error");
-        }
-      }
-    } catch (e) {
-      setSyncState("error");
-    }
-  };
-
-  const signOut = async () => {
-    setMenuOpen(false);
-    try {
-      await firebase.auth().signOut();
-    } catch (e) {}
-    setSyncState("idle"); // the local mirror already holds the latest data
-  };
 
   const persistPresets = async (presets) => {
     await store.set(STORAGE_KEY, JSON.stringify(presets));
@@ -1105,82 +1042,11 @@ function AbsWorkoutTimer({ onHome }) {
 
   // ================= HOME: PICK A PRESET =================
   if (phase === "idle" && setupView === "home") {
-    const accountLabel = user ? user.displayName || user.email : "";
-    const renderAvatar = (photoStyle, fallbackStyle) =>
-      user.photoURL ? (
-        <img src={user.photoURL} alt="" referrerPolicy="no-referrer" style={photoStyle} />
-      ) : (
-        <span style={fallbackStyle}>{(accountLabel || "?").charAt(0).toUpperCase()}</span>
-      );
     return (
       <div style={{ ...styles.screen, background: "#0F1520" }}>
         <div style={styles.setupWrap}>
           <div style={styles.pageHeader}>
             <HomeButton onClick={onHome} />
-            {firebaseReady && (
-              <div style={styles.accountMenuWrap}>
-                {user ? (
-                <React.Fragment>
-                  <button
-                    onClick={() => setMenuOpen((o) => !o)}
-                    style={styles.accountChip}
-                    aria-label="Account menu"
-                    aria-haspopup="menu"
-                    aria-expanded={menuOpen}
-                  >
-                    {renderAvatar(styles.accountPhoto, {
-                      ...styles.avatarFallback,
-                      ...styles.accountPhoto,
-                    })}
-                    <span style={{ ...styles.accountName, maxWidth: 140 }}>{accountLabel}</span>
-                    <span style={styles.accountCaret}>{menuOpen ? "▴" : "▾"}</span>
-                  </button>
-                  {menuOpen && (
-                    <React.Fragment>
-                      <div style={styles.menuBackdrop} onClick={() => setMenuOpen(false)} />
-                      <div style={styles.accountMenu} role="menu">
-                        <div style={styles.accountMenuHeader}>
-                          {renderAvatar(styles.accountPhoto, {
-                            ...styles.avatarFallback,
-                            ...styles.accountPhoto,
-                          })}
-                          <span style={styles.accountName}>{accountLabel}</span>
-                        </div>
-                        <div
-                          style={{
-                            ...styles.syncHint,
-                            color:
-                              syncState === "error" || syncState === "denied"
-                                ? "#FCA5A5"
-                                : "#5F7290",
-                          }}
-                        >
-                          {syncState === "syncing"
-                            ? "Syncing…"
-                            : syncState === "denied"
-                            ? "Sync blocked — publish the database rules"
-                            : syncState === "error"
-                            ? "Offline — saved on this device"
-                            : "Synced"}
-                        </div>
-                        <button onClick={signOut} style={styles.signOutLink} role="menuitem">
-                          Sign out
-                        </button>
-                      </div>
-                    </React.Fragment>
-                  )}
-                </React.Fragment>
-              ) : (
-                <button
-                  onClick={signIn}
-                  style={styles.accountBtn}
-                  title="Sign in with Google to sync your presets"
-                >
-                  Sign in
-                </button>
-              )}
-              </div>
-            )}
           </div>
 
           <div style={styles.eyebrow}>ABS CIRCUIT</div>
@@ -1234,11 +1100,6 @@ function AbsWorkoutTimer({ onHome }) {
             )}
           </div>
 
-          {firebaseReady && !user && (
-            <div style={styles.signInHint}>
-              Sign in with Google to sync your presets across devices.
-            </div>
-          )}
         </div>
 
         {confirmDelete && (
@@ -2169,10 +2030,90 @@ function GymTracker({ onHome }) {
 }
 
 // ---- Landing page: pick a section ----
-function HomePage({ onOpenTimer, onOpenGym }) {
+function HomePage({ onOpenTimer, onOpenGym, user, syncState, onSignIn, onSignOut }) {
+  const [menuOpen, setMenuOpen] = useState(false); // account dropdown (top-right)
+  useEffect(() => {
+    setMenuOpen(false); // menu belongs to the previous auth state
+  }, [user ? user.uid : null]);
+
+  const accountLabel = user ? user.displayName || user.email : "";
+  const renderAvatar = (photoStyle, fallbackStyle) =>
+    user.photoURL ? (
+      <img src={user.photoURL} alt="" referrerPolicy="no-referrer" style={photoStyle} />
+    ) : (
+      <span style={fallbackStyle}>{(accountLabel || "?").charAt(0).toUpperCase()}</span>
+    );
+
   return (
     <div style={{ ...styles.screen, background: "#0F1520" }}>
       <div style={styles.setupWrap}>
+        <div style={styles.pageHeader}>
+          <span />
+          {firebaseReady && (
+            <div style={styles.accountMenuWrap}>
+              {user ? (
+                <React.Fragment>
+                  <button
+                    onClick={() => setMenuOpen((o) => !o)}
+                    style={styles.accountChip}
+                    aria-label="Account menu"
+                    aria-haspopup="menu"
+                    aria-expanded={menuOpen}
+                  >
+                    {renderAvatar(styles.accountPhoto, {
+                      ...styles.avatarFallback,
+                      ...styles.accountPhoto,
+                    })}
+                    <span style={{ ...styles.accountName, maxWidth: 140 }}>{accountLabel}</span>
+                    <span style={styles.accountCaret}>{menuOpen ? "▴" : "▾"}</span>
+                  </button>
+                  {menuOpen && (
+                    <React.Fragment>
+                      <div style={styles.menuBackdrop} onClick={() => setMenuOpen(false)} />
+                      <div style={styles.accountMenu} role="menu">
+                        <div style={styles.accountMenuHeader}>
+                          {renderAvatar(styles.accountPhoto, {
+                            ...styles.avatarFallback,
+                            ...styles.accountPhoto,
+                          })}
+                          <span style={styles.accountName}>{accountLabel}</span>
+                        </div>
+                        <div
+                          style={{
+                            ...styles.syncHint,
+                            color:
+                              syncState === "error" || syncState === "denied"
+                                ? "#FCA5A5"
+                                : "#5F7290",
+                          }}
+                        >
+                          {syncState === "syncing"
+                            ? "Syncing…"
+                            : syncState === "denied"
+                            ? "Sync blocked — publish the database rules"
+                            : syncState === "error"
+                            ? "Offline — saved on this device"
+                            : "Synced"}
+                        </div>
+                        <button onClick={onSignOut} style={styles.signOutLink} role="menuitem">
+                          Sign out
+                        </button>
+                      </div>
+                    </React.Fragment>
+                  )}
+                </React.Fragment>
+              ) : (
+                <button
+                  onClick={onSignIn}
+                  style={styles.accountBtn}
+                  title="Sign in with Google to sync your data"
+                >
+                  Sign in
+                </button>
+              )}
+            </div>
+          )}
+        </div>
         <div style={styles.eyebrow}>WORKOUT</div>
         <h1 style={styles.setupTitle}>What are we training today?</h1>
         <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 24 }}>
@@ -2193,17 +2134,102 @@ function HomePage({ onOpenTimer, onOpenGym }) {
             <span style={styles.presetArrow}>›</span>
           </div>
         </div>
+        {firebaseReady && !user && (
+          <div style={styles.signInHint}>
+            Sign in with Google to sync your presets and gym log across devices.
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 // ---- Root: home ⇄ timer / gym tracker ----
+// Auth lives here (not in a page) so the account section can render on the
+// landing page while the timer still reloads presets when the user changes.
 function App() {
   const [page, setPage] = useState("home");
-  if (page === "timer") return <AbsWorkoutTimer onHome={() => setPage("home")} />;
+  const [user, setUser] = useState(null);
+  const [authReady, setAuthReady] = useState(!firebaseReady); // no firebase => nothing to wait for
+  const [syncState, setSyncState] = useState("idle"); // idle | syncing | synced | error | denied
+
+  useEffect(() => {
+    store.notify = (s) => setSyncState(s);
+    if (!firebaseReady) {
+      return () => {
+        store.notify = null;
+      };
+    }
+    let unsub = null;
+    try {
+      unsub = firebase.auth().onAuthStateChanged(
+        (u) => {
+          setUser(u);
+          setAuthReady(true);
+        },
+        () => setAuthReady(true)
+      );
+    } catch (e) {
+      setAuthReady(true);
+    }
+    return () => {
+      store.notify = null;
+      if (unsub) unsub();
+    };
+  }, []);
+
+  const signIn = async () => {
+    try {
+      const provider = new firebase.auth.GoogleAuthProvider();
+      try {
+        await firebase.auth().signInWithPopup(provider);
+      } catch (e) {
+        // Popup blocked (common on mobile) → best-effort redirect fallback.
+        // Note: redirect with the default *.firebaseapp.com authDomain is
+        // degraded by third-party-cookie blocking in some browsers; popup is
+        // the primary path. A user closing the popup is not an error.
+        if (
+          e &&
+          (e.code === "auth/popup-blocked" ||
+            e.code === "auth/operation-not-supported-in-this-environment")
+        ) {
+          await firebase.auth().signInWithRedirect(provider);
+        } else if (!e || e.code !== "auth/popup-closed-by-user") {
+          setSyncState("error");
+        }
+      }
+    } catch (e) {
+      setSyncState("error");
+    }
+  };
+
+  const signOut = async () => {
+    try {
+      await firebase.auth().signOut();
+    } catch (e) {}
+    setSyncState("idle"); // the local mirror already holds the latest data
+  };
+
+  if (page === "timer")
+    return (
+      <AbsWorkoutTimer
+        onHome={() => setPage("home")}
+        user={user}
+        authReady={authReady}
+        onSyncState={setSyncState}
+      />
+    );
   if (page === "gym") return <GymTracker onHome={() => setPage("home")} />;
-  return <HomePage onOpenTimer={() => setPage("timer")} onOpenGym={() => setPage("gym")} />;
+  return (
+    <HomePage
+      onOpenTimer={() => setPage("timer")}
+      onOpenGym={() => setPage("gym")}
+      user={user}
+      syncState={syncState}
+      onSignIn={signIn}
+      onSignOut={signOut}
+    />
+  );
 }
 
 // ---- Reusable stepper control ----
