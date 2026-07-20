@@ -580,7 +580,7 @@ function SkeletonCard({ delay = 0 }) {
   );
 }
 
-function AbsWorkoutTimer({ onOpenGym }) {
+function AbsWorkoutTimer({ onHome }) {
   // ---- Setup flow: home (pick preset) → preview → edit ----
   const [setupView, setSetupView] = useState("home");
   const [workout, setWorkout] = useState(() => withUids(BUILTIN_PRESETS[0].exercises));
@@ -1095,7 +1095,9 @@ function AbsWorkoutTimer({ onOpenGym }) {
       <div style={{ ...styles.screen, background: "#0F1520" }}>
         <div style={styles.setupWrap}>
           <div style={styles.homeTopBar}>
-            <div style={{ ...styles.eyebrow, marginBottom: 0 }}>ABS CIRCUIT</div>
+            <button onClick={onHome} style={styles.homeBtn}>
+              ‹ Home
+            </button>
             {firebaseReady && (
               <div style={styles.accountMenuWrap}>
                 {user ? (
@@ -1162,6 +1164,7 @@ function AbsWorkoutTimer({ onOpenGym }) {
             )}
           </div>
 
+          <div style={styles.eyebrow}>ABS CIRCUIT</div>
           <h1 style={styles.setupTitle}>Pick your workout.</h1>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -1210,14 +1213,6 @@ function AbsWorkoutTimer({ onOpenGym }) {
                 <SkeletonCard delay={0.2} />
               </React.Fragment>
             )}
-          </div>
-
-          <div style={styles.gymNavCard} onClick={onOpenGym}>
-            <div style={{ flex: 1 }}>
-              <div style={styles.presetCardName}>🏋️ Gym Log</div>
-              <div style={styles.presetCardMeta}>Track exercises, weights & sessions</div>
-            </div>
-            <span style={styles.presetArrow}>›</span>
           </div>
 
           {firebaseReady && !user && (
@@ -1669,7 +1664,7 @@ const fmtSet = (st) =>
     ? `${st.weight}kg`
     : `× ${st.reps}`;
 
-function GymTracker({ onBack }) {
+function GymTracker({ onHome }) {
   const [loaded, setLoaded] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [weights, setWeights] = useState({}); // exId → { weight, reps, at }
@@ -2049,8 +2044,8 @@ function GymTracker({ onBack }) {
   return (
     <div style={{ ...styles.screen, background: "#0F1520" }}>
       <div style={styles.setupWrap}>
-        <button onClick={onBack} style={styles.backLink}>
-          ‹ Timer
+        <button onClick={onHome} style={{ ...styles.homeBtn, alignSelf: "flex-start", paddingBottom: 20 }}>
+          ‹ Home
         </button>
         <div style={styles.eyebrow}>GYM LOG</div>
         <h1 style={styles.setupTitle}>Track your lifts.</h1>
@@ -2148,14 +2143,42 @@ function GymTracker({ onBack }) {
   );
 }
 
-// ---- Root: timer ⇄ gym tracker ----
-function App() {
-  const [page, setPage] = useState("timer");
-  return page === "gym" ? (
-    <GymTracker onBack={() => setPage("timer")} />
-  ) : (
-    <AbsWorkoutTimer onOpenGym={() => setPage("gym")} />
+// ---- Landing page: pick a section ----
+function HomePage({ onOpenTimer, onOpenGym }) {
+  return (
+    <div style={{ ...styles.screen, background: "#0F1520" }}>
+      <div style={styles.setupWrap}>
+        <div style={styles.eyebrow}>WORKOUT</div>
+        <h1 style={styles.setupTitle}>What are we training today?</h1>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={styles.homeNavCard} onClick={onOpenTimer}>
+            <span style={styles.homeNavEmoji}>⏱️</span>
+            <div style={{ flex: 1 }}>
+              <div style={styles.presetCardName}>Abs Timer</div>
+              <div style={styles.presetCardMeta}>Timed core circuits with presets</div>
+            </div>
+            <span style={styles.presetArrow}>›</span>
+          </div>
+          <div style={styles.homeNavCard} onClick={onOpenGym}>
+            <span style={styles.homeNavEmoji}>🏋️</span>
+            <div style={{ flex: 1 }}>
+              <div style={styles.presetCardName}>Gym Log</div>
+              <div style={styles.presetCardMeta}>Track exercises, weights & sessions</div>
+            </div>
+            <span style={styles.presetArrow}>›</span>
+          </div>
+        </div>
+      </div>
+    </div>
   );
+}
+
+// ---- Root: home ⇄ timer / gym tracker ----
+function App() {
+  const [page, setPage] = useState("home");
+  if (page === "timer") return <AbsWorkoutTimer onHome={() => setPage("home")} />;
+  if (page === "gym") return <GymTracker onHome={() => setPage("home")} />;
+  return <HomePage onOpenTimer={() => setPage("timer")} onOpenGym={() => setPage("gym")} />;
 }
 
 // ---- Reusable stepper control ----
@@ -2723,18 +2746,29 @@ const styles = {
     border: "2px solid #1D2739",
     background: "#121927",
   },
-  // ---- Gym tracker ----
-  gymNavCard: {
+  // ---- Landing page / header nav ----
+  homeBtn: {
+    background: "none",
+    border: "none",
+    color: "#5B8DEF",
+    fontSize: 16,
+    fontWeight: 700,
+    fontFamily: "inherit",
+    cursor: "pointer",
+    padding: 0,
+  },
+  homeNavCard: {
     display: "flex",
     alignItems: "center",
-    gap: 12,
-    padding: "18px 18px",
+    gap: 14,
+    padding: "22px 18px",
     borderRadius: 16,
-    border: "2px solid #2B3B5C",
-    background: "#121A2C",
+    border: "2px solid #26324A",
+    background: "#141C2C",
     cursor: "pointer",
-    marginTop: 18,
   },
+  homeNavEmoji: { fontSize: 30 },
+  // ---- Gym tracker ----
   gymActiveHint: { marginTop: 10, fontSize: 13, fontWeight: 600, color: "#6EE7B7" },
   gymEmptyText: { padding: "14px 0", color: "#8FA3BF", fontSize: 14, lineHeight: 1.5 },
   gymSearchInput: {

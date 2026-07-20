@@ -14,7 +14,7 @@ Open `index.html` directly in a browser, or serve the directory with any static 
 
 `index.html` loads React 18, ReactDOM, and Babel Standalone from cdnjs, then defines the whole app as JSX inside a `<script type="text/babel">` block, compiled in the browser at runtime. Everything below applies to that one script block:
 
-- **Root component `App`** switches between the two pages: `AbsWorkoutTimer` (the timer, default) and `GymTracker` (gym log), linked from the timer's home screen via the "Gym Log" card.
+- **Root component `App`** switches between three pages: `HomePage` (the landing page, default) with cards linking to `AbsWorkoutTimer` (abs timer) and `GymTracker` (gym log); both pages have a "‹ Home" button in their header back to the landing page.
 - **`AbsWorkoutTimer`** holds all timer state. Two orthogonal state machines drive which screen renders:
   - `setupView` (`home` → `preview` → `edit`) controls the setup screens, active only while `phase === "idle"`.
   - `phase` (`idle` → `ready` → `work` ⇄ `rest`/`roundRest` → `done`) is the workout state machine. Transitions live in `advance()`, triggered when the 1-second `setInterval` tick drives `timeLeft` to 0. `THEME` maps each phase to a background/accent color for the active-timer screen.
