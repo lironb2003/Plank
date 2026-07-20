@@ -21,6 +21,7 @@
   <style>
     html, body { margin: 0; padding: 0; background: #0F1520; }
     #root { min-height: 100vh; }
+    @keyframes app-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
   </style>
 </head>
 <body>
@@ -554,6 +555,39 @@ const THEME = {
   done: { bg: "#111827", accent: "#FDE68A", label: "DONE" },
 };
 
+// ---- Loading skeletons ----
+// Pulsing placeholders shown while stored data loads (the app can't know how
+// long a Firestore read takes). The pulse keyframes live in the <head> style
+// block since inline styles can't declare @keyframes.
+function Skeleton({ w, h, r = 8, delay = 0, style }) {
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        width: w,
+        height: h,
+        borderRadius: r,
+        background: "#26324A",
+        animation: "app-pulse 1.3s ease-in-out infinite",
+        animationDelay: delay ? `${delay}s` : undefined,
+        ...style,
+      }}
+    />
+  );
+}
+
+// Placeholder matching the preset/history card layout.
+function SkeletonCard({ delay = 0 }) {
+  return (
+    <div style={styles.skeletonCard} aria-hidden="true">
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 9 }}>
+        <Skeleton w="52%" h={15} delay={delay} />
+        <Skeleton w="72%" h={11} delay={delay + 0.12} />
+      </div>
+    </div>
+  );
+}
+
 function AbsWorkoutTimer({ onOpenGym }) {
   // ---- Setup flow: home (pick preset) → preview → edit ----
   const [setupView, setSetupView] = useState("home");
@@ -565,6 +599,7 @@ function AbsWorkoutTimer({ onOpenGym }) {
   const [selectedName, setSelectedName] = useState(BUILTIN_PRESETS[0].name);
   const [edited, setEdited] = useState(false);
   const [customPresets, setCustomPresets] = useState([]);
+  const [presetsLoaded, setPresetsLoaded] = useState(false);
   const [presetName, setPresetName] = useState("");
   const [showLibrary, setShowLibrary] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
@@ -639,6 +674,7 @@ function AbsWorkoutTimer({ onOpenGym }) {
   useEffect(() => {
     if (!authReady) return;
     let cancelled = false;
+    setPresetsLoaded(false); // re-runs on sign-in/out: show skeletons while refetching
     (async () => {
       try {
         if (user) setSyncState("syncing");
@@ -651,6 +687,7 @@ function AbsWorkoutTimer({ onOpenGym }) {
         }
         if (!cancelled) {
           setCustomPresets(presets);
+          setPresetsLoaded(true);
           setConfirmDelete(null); // pending confirmation may target a preset gone after reload
           if (user) setSyncState("synced");
         }
@@ -660,6 +697,7 @@ function AbsWorkoutTimer({ onOpenGym }) {
             setCustomPresets(e.fallback);
             setConfirmDelete(null);
           }
+          setPresetsLoaded(true);
           if (user) setSyncState(e && e.code === "permission-denied" ? "denied" : "error");
         }
       }
@@ -1135,7 +1173,7 @@ function AbsWorkoutTimer({ onOpenGym }) {
           <h1 style={styles.setupTitle}>Pick your workout.</h1>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {allPresets.map((p) => {
+            {(presetsLoaded ? allPresets : BUILTIN_PRESETS).map((p) => {
               const exs = p.exercises.map(resolveEntry).filter(Boolean);
               const mins = Math.max(
                 1,
@@ -1174,6 +1212,12 @@ function AbsWorkoutTimer({ onOpenGym }) {
                 </div>
               );
             })}
+            {!presetsLoaded && (
+              <React.Fragment>
+                <SkeletonCard />
+                <SkeletonCard delay={0.2} />
+              </React.Fragment>
+            )}
           </div>
 
           <div style={styles.gymNavCard} onClick={onOpenGym}>
@@ -2019,13 +2063,22 @@ function GymTracker({ onBack }) {
         <div style={styles.eyebrow}>GYM LOG</div>
         <h1 style={styles.setupTitle}>Track your lifts.</h1>
 
-        <button onClick={active ? () => setView("session") : startSession} style={styles.startBtn}>
-          {active ? "RESUME SESSION" : "START GYM SESSION"}
-        </button>
-        {active && (
-          <div style={styles.gymActiveHint}>
-            In progress — started {fmtSessionDate(active.startedAt)}
-          </div>
+        {loaded ? (
+          <React.Fragment>
+            <button
+              onClick={active ? () => setView("session") : startSession}
+              style={styles.startBtn}
+            >
+              {active ? "RESUME SESSION" : "START GYM SESSION"}
+            </button>
+            {active && (
+              <div style={styles.gymActiveHint}>
+                In progress — started {fmtSessionDate(active.startedAt)}
+              </div>
+            )}
+          </React.Fragment>
+        ) : (
+          <Skeleton h={62} r={16} style={{ marginTop: 28 }} />
         )}
 
         <div style={styles.sectionLabel}>HISTORY</div>
@@ -2035,6 +2088,13 @@ function GymTracker({ onBack }) {
           </div>
         )}
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {!loaded && (
+            <React.Fragment>
+              <SkeletonCard />
+              <SkeletonCard delay={0.15} />
+              <SkeletonCard delay={0.3} />
+            </React.Fragment>
+          )}
           {sessions.map((s) => {
             const totalSets = s.entries.reduce((a, en) => a + en.sets.length, 0);
             const open = openSessionId === s.id;
@@ -2661,6 +2721,15 @@ const styles = {
     fontSize: 16,
     fontWeight: 700,
     cursor: "pointer",
+  },
+  // ---- Loading skeletons ----
+  skeletonCard: {
+    display: "flex",
+    alignItems: "center",
+    padding: "19px 18px",
+    borderRadius: 16,
+    border: "2px solid #1D2739",
+    background: "#121927",
   },
   // ---- Gym tracker ----
   gymNavCard: {
