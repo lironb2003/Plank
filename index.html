@@ -2054,6 +2054,35 @@ const fmtSessionDate = (iso) => {
   }
 };
 
+// A persisted active session is rendered directly, so one malformed entry used
+// to take the whole page down with it (`en.sets.some` on an undefined `sets`)
+// — and a blank page is a session you can never finish or discard. Anything
+// unusable is dropped rather than trusted; anything missing is filled in.
+const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+const sanitizeActive = (raw) => {
+  if (!raw || typeof raw !== "object" || !Array.isArray(raw.entries)) return null;
+  const entries = raw.entries
+    .filter((en) => en && typeof en === "object" && typeof en.exId === "string")
+    .map((en) => ({
+      uid: typeof en.uid === "string" ? en.uid : uid(),
+      exId: en.exId,
+      sets: (Array.isArray(en.sets) ? en.sets : [])
+        .filter((st) => st && typeof st === "object")
+        .map((st) => ({
+          uid: typeof st.uid === "string" ? st.uid : uid(),
+          // inputs are controlled, so these must be strings or React switches
+          // the field to uncontrolled and the value stops updating
+          weight: st.weight == null ? "" : String(st.weight),
+          reps: st.reps == null ? "" : String(st.reps),
+        })),
+    }));
+  return {
+    id: typeof raw.id === "string" ? raw.id : `s-${Date.now()}`,
+    startedAt: typeof raw.startedAt === "string" ? raw.startedAt : new Date().toISOString(),
+    entries,
+  };
+};
+
 const fmtSet = (st) =>
   st.weight != null && st.reps != null
     ? `${st.weight}kg × ${st.reps}`
@@ -2095,8 +2124,8 @@ function GymTracker({ onHome }) {
       setSessions(Array.isArray(sess) ? sess : []);
       const wm = parse(w, {});
       setWeights(wm && typeof wm === "object" && !Array.isArray(wm) ? wm : {});
-      const act = parse(a, null);
-      if (act && Array.isArray(act.entries)) setActive(act);
+      const act = sanitizeActive(parse(a, null));
+      if (act) setActive(act);
       setLoaded(true);
     })();
     return () => {
@@ -2206,22 +2235,38 @@ function GymTracker({ onHome }) {
       ),
     });
 
-  const hasLoggedSet =
-    active &&
-    active.entries.some((en) =>
-      en.sets.some((st) => parseNum(st.weight) != null || parseNum(st.reps) != null)
-    );
+  const loggedSets = !active
+    ? 0
+    : (Array.isArray(active.entries) ? active.entries : []).reduce(
+        (n, en) =>
+          n +
+          (Array.isArray(en && en.sets) ? en.sets : []).filter(
+            (st) => st && (parseNum(st.weight) != null || parseNum(st.reps) != null)
+          ).length,
+        0
+      );
+  const hasLoggedSet = loggedSets > 0;
 
+  // Finishing has to work whatever state the session is in. This used to bail
+  // out silently when nothing had been logged, which left the button dead and
+  // the session impossible to clear — and with no "start new" on the home
+  // screen either, that was a dead end with no way out of it.
   const finishSession = () => {
-    const entries = active.entries
+    if (!active) return;
+    const entries = (Array.isArray(active.entries) ? active.entries : [])
       .map((en) => ({
         exId: en.exId,
-        sets: en.sets
-          .map((st) => ({ weight: parseNum(st.weight), reps: parseNum(st.reps) }))
+        sets: (Array.isArray(en && en.sets) ? en.sets : [])
+          .map((st) => ({ weight: parseNum(st && st.weight), reps: parseNum(st && st.reps) }))
           .filter((st) => st.weight != null || st.reps != null),
       }))
       .filter((en) => en.sets.length > 0);
-    if (entries.length === 0) return;
+    if (entries.length === 0) {
+      // nothing worth keeping — just close it out
+      persistActiveNow(null);
+      setView("home");
+      return;
+    }
     const session = {
       id: active.id,
       startedAt: active.startedAt,
@@ -2272,17 +2317,38 @@ function GymTracker({ onHome }) {
     return w.reps != null ? `${w.weight}kg × ${w.reps}` : `${w.weight}kg`;
   };
 
-  const confirmOverlay = confirmAction && (
+  const CONFIRMS = {
+    discard: {
+      title: "Discard session?",
+      text: hasLoggedSet
+        ? `The ${loggedSets} set${loggedSets !== 1 ? "s" : ""} logged here won't be saved.`
+        : "This gym session won't be saved.",
+      action: "Discard",
+      run: discardSession,
+    },
+    startNew: {
+      title: "Start a new session?",
+      text: hasLoggedSet
+        ? `The session in progress has ${loggedSets} logged set${
+            loggedSets !== 1 ? "s" : ""
+          } that will be discarded. To keep it, resume it and tap Finish instead.`
+        : "The session in progress is empty, so nothing will be lost.",
+      action: "Start new",
+      run: startSession,
+    },
+    deleteSession: {
+      title: "Delete session?",
+      text: `The session from ${confirmAction ? confirmAction.label : ""} will be removed. This can't be undone.`,
+      action: "Delete",
+      run: () => deleteSession(confirmAction.id),
+    },
+  };
+  const confirmSpec = confirmAction && (CONFIRMS[confirmAction.type] || CONFIRMS.deleteSession);
+  const confirmOverlay = confirmSpec && (
     <div style={styles.confirmOverlay} onClick={() => setConfirmAction(null)}>
       <div style={styles.confirmBox} onClick={(e) => e.stopPropagation()}>
-        <div style={styles.confirmTitle}>
-          {confirmAction.type === "discard" ? "Discard session?" : "Delete session?"}
-        </div>
-        <div style={styles.confirmText}>
-          {confirmAction.type === "discard"
-            ? "This gym session won't be saved."
-            : `The session from ${confirmAction.label} will be removed. This can't be undone.`}
-        </div>
+        <div style={styles.confirmTitle}>{confirmSpec.title}</div>
+        <div style={styles.confirmText}>{confirmSpec.text}</div>
         <div style={styles.confirmActions}>
           <button style={styles.confirmCancel} onClick={() => setConfirmAction(null)}>
             Cancel
@@ -2290,12 +2356,11 @@ function GymTracker({ onHome }) {
           <button
             style={styles.confirmDeleteBtn}
             onClick={() => {
-              if (confirmAction.type === "discard") discardSession();
-              else deleteSession(confirmAction.id);
+              confirmSpec.run();
               setConfirmAction(null);
             }}
           >
-            {confirmAction.type === "discard" ? "Discard" : "Delete"}
+            {confirmSpec.action}
           </button>
         </div>
       </div>
@@ -2423,13 +2488,14 @@ function GymTracker({ onHome }) {
             </div>
           )}
 
-          <button
-            onClick={finishSession}
-            disabled={!hasLoggedSet}
-            style={{ ...styles.startBtn, opacity: hasLoggedSet ? 1 : 0.4 }}
-          >
+          <button onClick={finishSession} style={styles.startBtn}>
             FINISH SESSION
           </button>
+          {!hasLoggedSet && (
+            <div style={styles.gymFinishHint}>
+              Nothing logged yet — finishing will just close this session.
+            </div>
+          )}
           <button onClick={() => setConfirmAction({ type: "discard" })} style={styles.editBtn}>
             Discard session
           </button>
@@ -2458,9 +2524,19 @@ function GymTracker({ onHome }) {
               {active ? "RESUME SESSION" : "START GYM SESSION"}
             </button>
             {active && (
-              <div style={styles.gymActiveHint}>
-                In progress — started {fmtSessionDate(active.startedAt)}
-              </div>
+              <React.Fragment>
+                <div style={styles.gymActiveHint}>
+                  In progress — started {fmtSessionDate(active.startedAt)}
+                  {hasLoggedSet ? ` · ${loggedSets} set${loggedSets !== 1 ? "s" : ""} logged` : " · nothing logged yet"}
+                </div>
+                {/* an in-progress session must never be the only thing on offer */}
+                <button
+                  onClick={() => setConfirmAction({ type: "startNew" })}
+                  style={styles.editBtn}
+                >
+                  Start a new session instead
+                </button>
+              </React.Fragment>
             )}
           </React.Fragment>
         ) : (
@@ -3374,6 +3450,13 @@ const styles = {
   homeNavEmoji: { fontSize: 30 },
   // ---- Gym tracker ----
   gymActiveHint: { marginTop: 10, fontSize: 13, fontWeight: 600, color: "#6EE7B7" },
+  gymFinishHint: {
+    marginTop: 10,
+    fontSize: 12.5,
+    color: "#8FA3BF",
+    lineHeight: 1.4,
+    textAlign: "center",
+  },
   gymEmptyText: { padding: "14px 0", color: "#8FA3BF", fontSize: 14, lineHeight: 1.5 },
   gymSearchInput: {
     width: "100%",
