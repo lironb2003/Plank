@@ -186,7 +186,16 @@ const audioCtx = () => {
       AUDIO.ctx = new AC();
       AUDIO.master = AUDIO.ctx.createGain();
       AUDIO.master.gain.value = 1;
-      AUDIO.master.connect(AUDIO.ctx.destination);
+      // Safety limiter. Cues overlap notes, so peaks stack; this lets each one
+      // sit as loud as it needs to without a stray sum clipping into a crackle.
+      const limiter = AUDIO.ctx.createDynamicsCompressor();
+      limiter.threshold.value = -4;
+      limiter.knee.value = 3;
+      limiter.ratio.value = 12;
+      limiter.attack.value = 0.004;
+      limiter.release.value = 0.15;
+      AUDIO.master.connect(limiter);
+      limiter.connect(AUDIO.ctx.destination);
     }
     if (AUDIO.ctx.state === "suspended") AUDIO.ctx.resume().catch(() => {});
     return AUDIO.ctx;
@@ -195,57 +204,87 @@ const audioCtx = () => {
   }
 };
 
-// One note. The envelope matters as much as the gain here: ramping straight
-// down from peak (what this used to do) leaves a long note sitting near silence
-// for most of its length, which is why the drawn-out "GO" read as quieter than
-// the short ticks before it. Attack → hold at full level → short release.
+// One struck note, built additively from sine partials. A few harmonics give
+// it enough body to carry on a phone speaker; a square wave carries too, but
+// its odd-harmonic stack up past 5kHz is what makes a beep sound harsh.
+//
+// The envelope matters as much as the level: ramping straight down from peak
+// leaves a long note sitting near silence for most of its length, which is why
+// the drawn-out "GO" used to read as quieter than the short ticks before it.
+// Struck attack → decay → held tail → soft release keeps the energy up while
+// still sounding plucked rather than blown.
 const tone = (ctx, at, spec) => {
   const dur = spec.dur;
-  const osc = ctx.createOscillator();
+  const peak = spec.gain;
+  const attack = Math.min(spec.attack == null ? 0.014 : spec.attack, dur / 4);
+  const decay = Math.min(0.12, dur / 3);
+  const tail = Math.max(0.0002, (spec.sustain == null ? 0.5 : spec.sustain) * peak);
+  const release = Math.min(0.16, dur / 2.5);
   const g = ctx.createGain();
-  osc.type = spec.type || "sine";
-  osc.frequency.setValueAtTime(spec.freq, at);
-  if (spec.to) osc.frequency.exponentialRampToValueAtTime(spec.to, at + dur);
-  const attack = Math.min(0.012, dur / 4);
-  const release = Math.min(0.07, dur / 3);
   g.gain.setValueAtTime(0.0001, at);
-  g.gain.linearRampToValueAtTime(spec.gain, at + attack);
-  g.gain.setValueAtTime(spec.gain, at + dur - release);
+  g.gain.linearRampToValueAtTime(peak, at + attack);
+  g.gain.exponentialRampToValueAtTime(tail, at + attack + decay);
+  g.gain.setValueAtTime(tail, at + dur - release);
   g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
-  osc.connect(g);
   g.connect(AUDIO.master);
-  osc.start(at);
-  osc.stop(at + dur + 0.02);
-  return osc;
+  const oscs = [];
+  (spec.partials || [1, 0.26, 0.08]).forEach((amp, k) => {
+    if (!amp) return;
+    const osc = ctx.createOscillator();
+    const pg = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(spec.freq * (k + 1), at);
+    pg.gain.value = amp;
+    osc.connect(pg);
+    pg.connect(g);
+    osc.start(at);
+    osc.stop(at + dur + 0.05);
+    oscs.push(osc);
+  });
+  return oscs;
 };
 
-// Square waves carry through a phone speaker far better than sines, which lose
-// most of their energy to the enclosure's low-end rolloff.
+// Everything is tuned to an A major triad (A5 880 · C#6 1109 · E6 1319), so the
+// ticks and the cue they resolve into belong to the same chord instead of just
+// being loud noises at each other.
+const A4 = 440;
+const CS5 = 554.37;
+const E5 = 659.25;
+const A5 = 880;
+const CS6 = 1108.73;
+const E6 = 1318.51;
+const A6 = 1760;
+
 const CUES = {
-  // countdown tick — short and bright
-  count: [
-    { at: 0, freq: 880, dur: 0.15, gain: 0.3, type: "square" },
-    { at: 0, freq: 1760, dur: 0.15, gain: 0.09, type: "sine" },
-  ],
-  // "GO" — the one that kept getting lost. Rising three-note figure over a
-  // sustained lower note: longer, louder and harmonically distinct from the ticks.
+  // countdown tick — a soft mallet on A5: quick decay, no ring, easy to hear
+  // three times in a row without getting shrill
+  count: [{ at: 0, freq: A5, dur: 0.24, gain: 0.36, sustain: 0.3, partials: [1, 0.2, 0.05] }],
+  // "GO" — the one that kept getting lost. Two grace notes rising into a
+  // sustained A major chime: longer and fuller than a tick, and resolved rather
+  // than piercing. The held tail is what carries it, not the attack.
   go: [
-    { at: 0, freq: 784, dur: 0.12, gain: 0.34, type: "square" },
-    { at: 0.1, freq: 1046, dur: 0.12, gain: 0.36, type: "square" },
-    { at: 0.2, freq: 1568, dur: 0.5, gain: 0.4, type: "square" },
-    { at: 0.2, freq: 784, dur: 0.6, gain: 0.2, type: "triangle" },
+    { at: 0, freq: A5, dur: 0.11, gain: 0.28, sustain: 0.4 },
+    { at: 0.085, freq: CS6, dur: 0.11, gain: 0.3, sustain: 0.4 },
+    { at: 0.17, freq: E6, dur: 0.95, gain: 0.3, sustain: 0.62, partials: [1, 0.22, 0.07] },
+    { at: 0.17, freq: A5, dur: 0.95, gain: 0.24, sustain: 0.62 },
+    { at: 0.17, freq: A4, dur: 1.05, gain: 0.18, sustain: 0.55, partials: [1, 0.3, 0.12] },
+    { at: 0.17, freq: A6, dur: 0.6, gain: 0.09, sustain: 0.4, partials: [1] },
   ],
-  // into a rest — falling, softer, unmistakably not "go"
+  // into a rest — the same chord falling instead of rising, deliberately
+  // warmer and quieter than "go" so the two are never confused
   rest: [
-    { at: 0, freq: 660, dur: 0.16, gain: 0.26, type: "triangle" },
-    { at: 0.14, freq: 440, dur: 0.34, gain: 0.26, type: "triangle" },
+    { at: 0, freq: E5, dur: 0.18, gain: 0.22, sustain: 0.35 },
+    { at: 0.15, freq: A4, dur: 0.6, gain: 0.24, sustain: 0.45, partials: [1, 0.3, 0.1] },
   ],
+  // finished — the arpeggio walked all the way up, left ringing
   done: [
-    { at: 0, freq: 784, dur: 0.16, gain: 0.34, type: "square" },
-    { at: 0.15, freq: 1046, dur: 0.16, gain: 0.34, type: "square" },
-    { at: 0.3, freq: 1318, dur: 0.16, gain: 0.34, type: "square" },
-    { at: 0.45, freq: 1568, dur: 0.8, gain: 0.42, type: "square" },
-    { at: 0.45, freq: 1046, dur: 0.9, gain: 0.22, type: "triangle" },
+    { at: 0, freq: A4, dur: 0.17, gain: 0.24, sustain: 0.35 },
+    { at: 0.15, freq: CS5, dur: 0.17, gain: 0.24, sustain: 0.35 },
+    { at: 0.3, freq: E5, dur: 0.17, gain: 0.24, sustain: 0.35 },
+    { at: 0.45, freq: A5, dur: 1.35, gain: 0.28, sustain: 0.6, partials: [1, 0.24, 0.08] },
+    { at: 0.45, freq: CS6, dur: 1.2, gain: 0.15, sustain: 0.55 },
+    { at: 0.45, freq: E6, dur: 1.2, gain: 0.13, sustain: 0.55 },
+    { at: 0.45, freq: A4, dur: 1.45, gain: 0.18, sustain: 0.55, partials: [1, 0.3, 0.12] },
   ],
 };
 
@@ -256,7 +295,7 @@ const playCue = (ctx, name, at) => {
   const nodes = [];
   parts.forEach((p) => {
     try {
-      nodes.push(tone(ctx, at + p.at, p));
+      nodes.push.apply(nodes, tone(ctx, at + p.at, p));
     } catch (e) {
       /* node limit / context closed */
     }
@@ -1460,6 +1499,8 @@ function AbsWorkoutTimer({ onHome, user, authReady, onSyncState }) {
       : null;
 
   const progress = 1 - timeLeft / Math.max(1, phaseTotal);
+  // wanted *and* allowed — a browser-level block wins over the in-app toggle
+  const notifyAlertsOn = notifyOn && notifyPerm !== "denied";
 
   const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
@@ -1614,6 +1655,46 @@ function AbsWorkoutTimer({ onHome, user, authReady, onSyncState }) {
               <span style={styles.timingLabel}>rounds</span>
             </div>
           </div>
+
+          {notifyPerm !== "unsupported" && (
+            <button
+              onClick={toggleNotify}
+              disabled={notifyPerm === "denied"}
+              aria-pressed={notifyAlertsOn}
+              style={{
+                ...styles.notifyRow,
+                opacity: notifyPerm === "denied" ? 0.6 : 1,
+                cursor: notifyPerm === "denied" ? "default" : "pointer",
+              }}
+            >
+              <span style={styles.notifyIcon}>{notifyAlertsOn ? "🔔" : "🔕"}</span>
+              <span style={{ flex: 1 }}>
+                <span style={styles.notifyLabel}>Alert me when the app isn't on screen</span>
+                <span style={styles.notifyHint}>
+                  {notifyPerm === "denied"
+                    ? "Blocked — allow notifications for this site in your browser settings"
+                    : !notifyOn
+                    ? "Off. The timer still runs and beeps in the background."
+                    : notifyPerm === "granted"
+                    ? "A notification at every exercise and rest, so you can pocket your phone."
+                    : "You'll be asked for permission when the workout starts."}
+                </span>
+              </span>
+              <span
+                style={{
+                  ...styles.switchTrack,
+                  background: notifyAlertsOn ? "#1D4ED8" : "#2A3448",
+                }}
+              >
+                <span
+                  style={{
+                    ...styles.switchKnob,
+                    transform: `translateX(${notifyAlertsOn ? 18 : 0}px)`,
+                  }}
+                />
+              </span>
+            </button>
+          )}
 
           <button onClick={start} style={styles.startBtn}>
             START WORKOUT
@@ -1882,28 +1963,13 @@ function AbsWorkoutTimer({ onHome, user, authReady, onSyncState }) {
         <span style={{ ...styles.roundTag, color: theme.accent }}>
           ROUND {round}/{totalRounds}
         </span>
-        <div style={styles.topBarIcons}>
-          {notifyPerm !== "unsupported" && notifyPerm !== "denied" && (
-            <button
-              onClick={toggleNotify}
-              style={{ ...styles.iconBtn, color: theme.accent, opacity: notifyOn ? 1 : 0.5 }}
-              aria-label={
-                notifyOn
-                  ? "Turn off background notifications"
-                  : "Notify me when the app is in the background"
-              }
-            >
-              {notifyOn ? "🔔" : "🔕"}
-            </button>
-          )}
-          <button
-            onClick={() => setSoundOn((s) => !s)}
-            style={{ ...styles.iconBtn, color: theme.accent }}
-            aria-label={soundOn ? "Mute sounds" : "Unmute sounds"}
-          >
-            {soundOn ? "🔊" : "🔇"}
-          </button>
-        </div>
+        <button
+          onClick={() => setSoundOn((s) => !s)}
+          style={{ ...styles.iconBtn, color: theme.accent }}
+          aria-label={soundOn ? "Mute sounds" : "Unmute sounds"}
+        >
+          {soundOn ? "🔊" : "🔇"}
+        </button>
       </div>
 
       <div style={styles.centerBlock}>
@@ -2967,6 +3033,39 @@ const styles = {
   },
   timingValue: { fontSize: 22, fontWeight: 800, fontVariantNumeric: "tabular-nums" },
   timingLabel: { fontSize: 11, color: "#8FA3BF", fontWeight: 600, lineHeight: 1.3 },
+  notifyRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    width: "100%",
+    marginTop: 24,
+    padding: "14px 16px",
+    borderRadius: 14,
+    border: "1px solid #26324A",
+    background: "#141C2C",
+    textAlign: "left",
+    font: "inherit",
+  },
+  notifyIcon: { fontSize: 20, lineHeight: 1 },
+  notifyLabel: { display: "block", fontSize: 14.5, fontWeight: 700, color: "#E6EDF9" },
+  notifyHint: { display: "block", fontSize: 12, color: "#8FA3BF", marginTop: 4, lineHeight: 1.4 },
+  switchTrack: {
+    flexShrink: 0,
+    width: 44,
+    height: 26,
+    borderRadius: 13,
+    padding: 3,
+    display: "flex",
+    alignItems: "center",
+    transition: "background 0.18s ease",
+  },
+  switchKnob: {
+    width: 20,
+    height: 20,
+    borderRadius: "50%",
+    background: "#fff",
+    transition: "transform 0.18s ease",
+  },
   sectionLabel: {
     fontSize: 12,
     letterSpacing: "0.2em",
@@ -3171,7 +3270,6 @@ const styles = {
   phaseTag: { fontSize: 14, fontWeight: 800, letterSpacing: "0.25em" },
   roundTag: { fontSize: 14, fontWeight: 700, letterSpacing: "0.15em" },
   iconBtn: { background: "none", border: "none", fontSize: 20, cursor: "pointer", padding: 4 },
-  topBarIcons: { display: "flex", alignItems: "center", gap: 6 },
   centerBlock: {
     flex: 1,
     display: "flex",
