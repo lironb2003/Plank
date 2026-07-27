@@ -66,7 +66,7 @@ function App() {
 
   if (page === "timer")
     return (
-      <AbsWorkoutTimer
+      <WorkoutTimer
         onHome={() => setPage("home")}
         user={user}
         authReady={authReady}

@@ -1,5 +1,6 @@
-// Fuzzy search over the gym catalog (English + Hebrew).
-// Loads after data/gym-exercises.js: it precomputes a haystack per exercise.
+// Fuzzy search over both exercise catalogs — the gym log's (English + Hebrew)
+// and the timer library's. Loads after src/data/: it precomputes a haystack
+// per exercise, so the catalogs must already exist.
 
 // Normalization: lowercase, strip niqqud, fold Hebrew final letters, drop
 // punctuation — so "לחיצת-חזה" matches "לחיצת חזה" and "bnch" matches "bench".
@@ -16,6 +17,14 @@ const normalizeSearch = (s) =>
 GYM_EXERCISES.forEach((ex) => {
   ex.search = normalizeSearch(
     ex.name + " " + ex.he + " " + (ex.alt || "") + " " + ex.group + " " + (GYM_GROUP_HE[ex.group] || "")
+  );
+});
+
+// The timer library is English-only, and its cues are worth matching too —
+// "hold" or "stretch" should surface the exercises described that way.
+LIBRARY.forEach((ex) => {
+  ex.search = normalizeSearch(
+    ex.name + " " + (ex.alt || "") + " " + ex.group + " " + (GROUP_ALIASES[ex.group] || "") + " " + ex.cue
   );
 });
 

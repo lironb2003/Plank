@@ -1,4 +1,4 @@
-// The abs-workout timer page: setup flow, the clock-driven timer engine, cue
+// The workout timer page: setup flow, the clock-driven timer engine, cue
 // scheduling, and background/notification handling.
 
 // ---- Phase colors ----
@@ -12,7 +12,7 @@ const THEME = {
 
 const ROW_H = 56; // fixed row height for drag math
 
-function AbsWorkoutTimer({ onHome, user, authReady, onSyncState }) {
+function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
   // ---- Setup flow: home (pick preset) → preview → edit ----
   const [setupView, setSetupView] = useState("home");
   const [workout, setWorkout] = useState(() => withUids(BUILTIN_PRESETS[0].exercises));
@@ -29,6 +29,8 @@ function AbsWorkoutTimer({ onHome, user, authReady, onSyncState }) {
   const [saveMsg, setSaveMsg] = useState("");
   const [infoUid, setInfoUid] = useState(null); // preview: expanded description row
   const [libInfoId, setLibInfoId] = useState(null); // edit: library exercise info
+  const [libQuery, setLibQuery] = useState(""); // edit: library search box
+  const [libGroup, setLibGroup] = useState(GROUPS[0]); // edit: browse-by-category
 
   const [confirmDelete, setConfirmDelete] = useState(null); // { id, name } awaiting confirmation
 
@@ -79,6 +81,17 @@ function AbsWorkoutTimer({ onHome, user, authReady, onSyncState }) {
     .filter(Boolean);
 
   const isCustomSelected = customPresets.some((p) => p.id === selectedId);
+
+  // Library picker: searching looks across every category, otherwise the
+  // selected category chip decides what's listed. Same shape as the gym log's
+  // catalog picker, minus the Hebrew.
+  const libResults = libQuery.trim()
+    ? LIBRARY.map((ex) => ({ ex, score: fuzzyScore(libQuery, ex.search) }))
+        .filter((r) => r.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 25)
+        .map((r) => r.ex)
+    : LIBRARY.filter((ex) => ex.group === libGroup);
 
   // ---- Load saved presets (re-runs when the signed-in user changes) ----
   // Auth itself lives in App; this page only consumes user/authReady and
@@ -694,7 +707,7 @@ function AbsWorkoutTimer({ onHome, user, authReady, onSyncState }) {
             <HomeButton onClick={onHome} />
           </div>
 
-          <div style={styles.eyebrow}>ABS CIRCUIT</div>
+          <div style={styles.eyebrow}>WORKOUT TIMER</div>
           <h1 style={styles.setupTitle}>Pick your workout.</h1>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 24 }}>
@@ -718,7 +731,8 @@ function AbsWorkoutTimer({ onHome, user, authReady, onSyncState }) {
                       {p.custom && <span style={styles.customBadge}>YOURS</span>}
                     </div>
                     <div style={styles.presetCardMeta}>
-                      {exs.length} exercises · {p.rounds} rounds · ~{mins} min
+                      {exs.length} exercise{exs.length !== 1 ? "s" : ""} · {p.rounds} round
+                      {p.rounds !== 1 ? "s" : ""} · ~{mins} min
                     </div>
                   </div>
                   {p.custom && (
@@ -790,7 +804,8 @@ function AbsWorkoutTimer({ onHome, user, authReady, onSyncState }) {
             {edited && <span style={styles.editedTag}> · edited</span>}
           </h1>
           <div style={styles.previewMeta}>
-            {exercises.length} exercises · {totalRounds} rounds · ~{totalMins} min
+            {exercises.length} exercise{exercises.length !== 1 ? "s" : ""} · {totalRounds} round
+            {totalRounds !== 1 ? "s" : ""} · ~{totalMins} min
           </div>
           <div style={styles.previewHint}>Tap an exercise to see how it's done</div>
 
@@ -976,37 +991,70 @@ function AbsWorkoutTimer({ onHome, user, authReady, onSyncState }) {
             {showLibrary ? "− Hide exercise library" : "+ Add exercises"}
           </button>
           {showLibrary && (
-            <div style={styles.libraryGrid}>
-              {LIBRARY.map((ex) => (
-                <React.Fragment key={ex.id}>
-                  <div style={styles.libChip}>
+            <div style={{ marginTop: 12 }}>
+              <input
+                value={libQuery}
+                onChange={(e) => setLibQuery(e.target.value)}
+                placeholder="Search exercises…"
+                style={styles.searchInput}
+              />
+              {!libQuery.trim() && (
+                <div style={styles.groupChips}>
+                  {GROUPS.map((g) => (
                     <button
-                      onClick={() => addExercise(ex.id)}
-                      style={styles.libAdd}
-                      aria-label={`Add ${ex.name}`}
-                    >
-                      + {ex.name} <span style={{ color: "#5B8DEF" }}>{ex.duration}s</span>
-                    </button>
-                    <button
-                      onClick={() => setLibInfoId(libInfoId === ex.id ? null : ex.id)}
+                      key={g}
+                      onClick={() => setLibGroup(g)}
+                      aria-pressed={libGroup === g}
                       style={{
-                        ...styles.libInfo,
-                        color: libInfoId === ex.id ? "#5B8DEF" : "#8FA3BF",
+                        ...styles.groupChip,
+                        borderColor: libGroup === g ? "#5B8DEF" : "#3B4A63",
+                        color: libGroup === g ? "#5B8DEF" : "#8FA3BF",
                       }}
-                      aria-label={`About ${ex.name}`}
-                      aria-expanded={libInfoId === ex.id}
-                      aria-controls={`lib-desc-${ex.id}`}
                     >
-                      {libInfoId === ex.id ? "▾" : "ⓘ"}
+                      {g}
                     </button>
-                  </div>
-                  {libInfoId === ex.id && (
-                    <div id={`lib-desc-${ex.id}`} style={styles.libDescBox}>
-                      <strong>{ex.name}</strong> — {ex.desc}
+                  ))}
+                </div>
+              )}
+              {libQuery.trim() && libResults.length === 0 && (
+                <div style={styles.emptyText}>No exercises match "{libQuery.trim()}".</div>
+              )}
+              <div style={{ ...styles.exList, marginTop: 10 }}>
+                {libResults.map((ex) => (
+                  <React.Fragment key={ex.id}>
+                    <div style={styles.resultRow} onClick={() => addExercise(ex.id)}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={styles.resultName}>{ex.name}</div>
+                        <div style={styles.resultMeta}>
+                          {ex.group} · {ex.cue}
+                        </div>
+                      </div>
+                      <span style={styles.resultDur}>{ex.duration}s</span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setLibInfoId(libInfoId === ex.id ? null : ex.id);
+                        }}
+                        style={{
+                          ...styles.libInfo,
+                          color: libInfoId === ex.id ? "#5B8DEF" : "#8FA3BF",
+                        }}
+                        aria-label={`About ${ex.name}`}
+                        aria-expanded={libInfoId === ex.id}
+                        aria-controls={`lib-desc-${ex.id}`}
+                      >
+                        {libInfoId === ex.id ? "▾" : "ⓘ"}
+                      </button>
+                      <span style={{ ...styles.presetArrow, fontSize: 22 }}>+</span>
                     </div>
-                  )}
-                </React.Fragment>
-              ))}
+                    {libInfoId === ex.id && (
+                      <div id={`lib-desc-${ex.id}`} style={styles.libDescBox}>
+                        {ex.desc}
+                      </div>
+                    )}
+                  </React.Fragment>
+                ))}
+              </div>
             </div>
           )}
 

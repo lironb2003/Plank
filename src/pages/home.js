@@ -89,8 +89,8 @@ function HomePage({ onOpenTimer, onOpenGym, user, syncState, onSignIn, onSignOut
           <div style={styles.homeNavCard} onClick={onOpenTimer}>
             <span style={styles.homeNavEmoji}>⏱️</span>
             <div style={{ flex: 1 }}>
-              <div style={styles.presetCardName}>Abs Timer</div>
-              <div style={styles.presetCardMeta}>Timed core circuits with presets</div>
+              <div style={styles.presetCardName}>Workout Timer</div>
+              <div style={styles.presetCardMeta}>Timed circuits — core, strength, cardio, mobility</div>
             </div>
             <span style={styles.presetArrow}>›</span>
           </div>

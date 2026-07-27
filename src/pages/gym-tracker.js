@@ -415,16 +415,16 @@ function GymTracker({ onHome }) {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search… / חיפוש תרגיל…"
             dir="auto"
-            style={styles.gymSearchInput}
+            style={styles.searchInput}
           />
           {!query.trim() && (
-            <div style={styles.gymGroupChips}>
+            <div style={styles.groupChips}>
               {GYM_GROUPS.map((g) => (
                 <button
                   key={g}
                   onClick={() => setGroupFilter(groupFilter === g ? null : g)}
                   style={{
-                    ...styles.gymGroupChip,
+                    ...styles.groupChip,
                     borderColor: groupFilter === g ? "#5B8DEF" : "#3B4A63",
                     color: groupFilter === g ? "#5B8DEF" : "#8FA3BF",
                   }}
@@ -435,16 +435,16 @@ function GymTracker({ onHome }) {
             </div>
           )}
           {query.trim() && results.length === 0 && (
-            <div style={styles.gymEmptyText}>No exercises match "{query.trim()}".</div>
+            <div style={styles.emptyText}>No exercises match "{query.trim()}".</div>
           )}
           {results.length > 0 && (
             <div style={{ ...styles.exList, marginTop: 10 }}>
               {results.map((ex) => {
                 const hint = lastHint(ex.id);
                 return (
-                  <div key={ex.id} style={styles.gymResultRow} onClick={() => addExercise(ex.id)}>
+                  <div key={ex.id} style={styles.resultRow} onClick={() => addExercise(ex.id)}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={styles.gymResultName}>{ex.name}</div>
+                      <div style={styles.resultName}>{ex.name}</div>
                       <div style={styles.gymEntryHe} dir="auto">
                         {ex.he} · {ex.group}
                       </div>
@@ -514,7 +514,7 @@ function GymTracker({ onHome }) {
 
         <div style={styles.sectionLabel}>HISTORY</div>
         {loaded && sessions.length === 0 && (
-          <div style={styles.gymEmptyText}>
+          <div style={styles.emptyText}>
             No sessions yet. Start one and it'll show up here with its date and weights.
           </div>
         )}
