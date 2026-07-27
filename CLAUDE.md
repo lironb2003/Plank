@@ -25,15 +25,40 @@ Skip steps 1–3 only for changes with no visual surface (docs, comments, config
 
 ## Overview
 
-A mobile-first abs workout timer, deployed as a static site (GitHub Pages, per the git history's CNAME commits). The app currently lives in one file, `index.html`, alongside an optional `sw.js` (notifications only) — one file by history, not by rule; see Constraints. There is no build step, no package.json, no linter, and no tests.
+A mobile-first abs workout timer, deployed as a static site (GitHub Pages, per the git history's CNAME commits). `index.html` is a shell that loads the app from `src/` as browser-compiled JSX, alongside an optional `sw.js` (notifications only). There is no build step, no package.json, no linter, and no tests.
 
 ## Running it
 
-Open `index.html` directly in a browser, or serve the directory with any static server (e.g. `python -m http.server`). Changes take effect on reload.
+Serve the directory — `python -m http.server`, or `npx -y serve -l 8123 .` to match `.claude/launch.json` — and open it. Changes take effect on reload. Opening `index.html` over `file://` does **not** work: Babel fetches the `src/` scripts over XHR, which needs an HTTP origin.
 
 ## Architecture
 
-`index.html` loads React 18, ReactDOM, and Babel Standalone from cdnjs, then defines the whole app as JSX inside a `<script type="text/babel">` block, compiled in the browser at runtime. Everything below applies to that one script block:
+`index.html` loads React 18, ReactDOM, and Babel Standalone from cdnjs, then lists the app's own files as `<script type="text/babel" src="…">` tags that Babel fetches and compiles in the browser at runtime.
+
+These are **classic scripts, not ES modules** — there is no bundler to resolve imports, so every file shares one global lexical scope, exactly as if they were still one script. Two consequences worth knowing before editing:
+
+- **A name may only be declared once across the whole app.** A second `const styles` (or `useState`, or any other top-level name) in a different file is a redeclaration error that blanks the page. React's hooks are destructured once, in `src/ui/components.js`.
+- **The `<script>` order in `index.html` is the dependency order.** Babel runs the files in the order they appear there: data → lib → ui → pages → main. Anything that *executes* at load (`src/lib/search.js` hanging a search haystack off `GYM_EXERCISES`, `src/main.js` rendering) must come after what it touches. Adding a file means adding a tag in the right place.
+
+The file map:
+
+| File | Holds |
+| --- | --- |
+| `src/data/library.js` | `LIBRARY` catalog, `BUILTIN_PRESETS`, `resolveEntry`/`withUids`, `GET_READY`, the presets storage key |
+| `src/data/gym-exercises.js` | `GYM_EXERCISES` catalog (EN/HE) and the three gym storage keys |
+| `src/lib/schedule.js` | `buildSchedule` / `segmentAt` — the flat segment list the timer plays back |
+| `src/lib/audio.js` | Cue synthesis: `tone`, the note vocabulary, `CUES`, `playCue`, `CUE_HORIZON` |
+| `src/lib/platform.js` | Mobile workarounds: the silent keep-alive loop, `notifySupported` |
+| `src/lib/search.js` | Normalization + `fuzzyScore` over the gym catalog |
+| `src/lib/store.js` | The `store` adapter, Firebase config/init, the local→cloud preset merge |
+| `src/ui/styles.js` | Every inline style, as one `styles` object |
+| `src/ui/components.js` | React hook globals; `Skeleton`, `SkeletonCard`, `HomeButton`, `Stepper` |
+| `src/pages/abs-timer.js` | `THEME`, `ROW_H`, `AbsWorkoutTimer` — setup flow, timer engine, cue scheduling, background handling |
+| `src/pages/gym-tracker.js` | `GymTracker` and its session helpers |
+| `src/pages/home.js` | `HomePage` landing page and the account menu |
+| `src/main.js` | `App` (auth + page switching) and the `createRoot` render |
+
+Everything below describes that code:
 
 - **Root component `App`** switches between three pages: `HomePage` (the landing page, default) with cards linking to `AbsWorkoutTimer` (abs timer) and `GymTracker` (gym log); both pages have a "‹ Home" button in their header back to the landing page.
 - **`AbsWorkoutTimer`** holds all timer state. Two orthogonal state machines drive which screen renders:
@@ -46,12 +71,12 @@ Open `index.html` directly in a browser, or serve the directory with any static 
 - **Persistence**: two layers behind the `store` adapter. Local: `window.storage` (Claude artifact storage, when running on claude.ai) falling back to `localStorage`. Cloud: Firestore docs `users/{uid}/data/{key}` shaped `{ value: <JSON string>, updatedAt }`, used automatically when a Google user is signed in (Firebase Auth; compat CDN builds loaded in `<head>`). Writes go local-first then fire-and-forget to Firestore; reads prefer cloud and mirror down locally. On sign-in, local presets merge up once per device+uid (union by preset id, cloud wins; `abs-timer-merged-<uid>` flag, `abs-timer-local-dirty` forces a re-merge for signed-out additions). If `FIREBASE_CONFIG` still has its `PASTE_` placeholders or the SDK fails to load, `firebaseReady` is false and the app degrades to exactly the localStorage-only behavior (account row hidden). Custom presets live under the key `abs-timer-custom-presets`.
 - **`GymTracker`** is the gym-log page (`view`: `home` ⇄ `session`). `GYM_EXERCISES` is a fixed ~110-exercise catalog with English + Hebrew names (`name`/`he`), muscle `group`, and optional `alt` aliases; a precomputed normalized `search` haystack per exercise feeds `fuzzyScore` (normalization strips niqqud, folds Hebrew final letters, drops punctuation; matching is per-token exact/prefix/substring/edit-distance≤2/subsequence). Three storage keys, all through the same `store` adapter: `abs-timer-gym-sessions` (history: `{ id, startedAt, endedAt, entries: [{ exId, sets: [{ weight, reps }] }] }`, newest first), `abs-timer-gym-weights` (last weight used per exercise, used for badges and set prefill), and `abs-timer-gym-active` (the in-progress session, so a reload can resume it). While editing, set weight/reps are kept as raw strings and parsed with `parseNum` on finish; active-session writes are debounced 600ms with a flush on `pagehide`/unmount.
 - **Drag-to-reorder** in the edit screen uses raw pointer events with fixed row height `ROW_H` for offset math; rows shift visually during the drag and the array reorder is committed once on pointer-up.
-- **Styling** is entirely inline via the `styles` object at the bottom of the script — there is no CSS file or class-based styling. Dark-navy palette (`#0F1520` background, `#5B8DEF` accent).
+- **Styling** is entirely inline via the `styles` object in `src/ui/styles.js` — there is no CSS file or class-based styling. Keys are grouped shared-first, then per page. Dark-navy palette (`#0F1520` background, `#5B8DEF` accent). The one stylesheet rule that can't be inline is the `app-pulse` keyframes for skeletons, which stays in the `<head>`.
 - Browser APIs used best-effort (wrapped in try/catch, must not break unsupported browsers): Web Audio for cues, Screen Wake Lock, Notifications, Service Worker.
 
 ## Constraints
 
-- **The single file is not sacred.** `index.html` holds everything today, but splitting it up is allowed and preferred once a section gets unwieldy — structure the code the way it should be rather than wedging it into one file. Netlify (`publish = "."`) and GitHub Pages both serve extra files as-is.
-- **No build step, though.** That constraint stays: the site is served straight from the repo root, so anything added has to run in the browser unmodified. Extra JSX goes in `<script type="text/babel" src="...">` tags, which Babel Standalone fetches and compiles at load; note that this needs a real server, so once the JSX leaves `index.html`, opening the page over `file://` stops working (CORS) and "serve the directory" becomes the only way to run it. Update the "Running it" section if that happens.
+- **File count is not sacred** — add or split files freely as the code needs it; Netlify (`publish = "."`) and GitHub Pages serve them as-is. Just add the `<script>` tag in `index.html` at the right point in the load order, and add a row to the file map above.
+- **No build step, though.** That constraint stays: the site is served straight from the repo root, so everything has to run in the browser unmodified — no bundler, no transpile beyond Babel Standalone, no `import`/`export`.
 - Babel Standalone compiles the JSX in-browser, so avoid syntax beyond what `data-presets="react"` handles.
 - `sw.js` is purely additive: it exists because Android Chrome will only deliver notifications through a service worker registration, it has no `fetch` handler and caches nothing, and when it isn't served (`file://`) registration just fails and the page falls back to the `Notification` constructor.
