@@ -6,7 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Follow this for every session; it is the default unless I say otherwise in that session.
 
-**Branching** — do all work on `dev`, branched from `origin/main`. Commit and push to `dev` as you go (`git push -u origin dev`) — every commit, not one squashed push at the end, so I can follow along on the Netlify branch deploy. Never push to `main`: I merge `dev` into `main` myself once I'm happy with it. Don't open a PR unless I ask. If `dev` has already been merged and I ask for something new, reset it onto the latest `main` (`git fetch origin main && git checkout -B dev origin/main`) rather than stacking on merged history.
+**Branching** — every task gets its own branch, cut fresh from the latest `dev`:
+
+```
+git fetch origin && git checkout -B <branch-name> origin/dev
+```
+
+Name it for the change, not for the session or the date: short, lowercase, hyphenated, and specific enough that I can tell what it does from the branch list — `add-workout-preset-button`, `fix-gym-session-escape`, `split-index-html`. Stick to `[a-z0-9-]`, because the name becomes a public URL (see "Finishing a task"). Don't reuse a branch for a second, unrelated task; branch again from `dev`.
+
+Commit and push as you go — `git push -u origin <branch-name>` on every commit, not one squashed push at the end — so I can follow the branch's Netlify deploy while you work. Keep each commit one logical change with an imperative subject and a body explaining why, not what.
+
+Merging is mine to ask for. Don't merge into `dev` or `main`, don't push to `main`, and don't open a PR unless I ask for one. When I do ask, fast-forward (`git merge --ff-only`) so history stays linear; if that isn't possible, rebase the branch onto the target first rather than making a merge commit. After a merge, deleting the branch locally is fine, but deleting it on the remote fails from this sandbox — the git proxy refuses ref deletions — so just tell me and I'll do it.
 
 **Before pushing a UI change**, verify it actually runs — the JSX is compiled in the browser, so a syntax slip or a bad render only surfaces at load time, never at commit time:
 
@@ -16,6 +26,14 @@ Follow this for every session; it is the default unless I say otherwise in that 
 4. Run `/code-review` on the working diff and fix what it turns up before committing.
 
 Skip steps 1–3 only for changes with no visual surface (docs, comments, config) — say so when you skip.
+
+**Finishing a task** — once the work is pushed, end the reply with the branch's Netlify deploy, on its own line:
+
+```
+https://<branch-name>--plunk.netlify.app/
+```
+
+That is the branch deploy for the branch you just pushed — substitute its name verbatim, which is why branch names stay lowercase and hyphenated. Give me the link every time you finish a task, not just when I ask, and give it even if you couldn't verify it from the sandbox (external hosts are blocked there, so treat the link as unverified rather than skipping it). It takes Netlify a minute or two after the push to go live.
 
 **House style**
 
