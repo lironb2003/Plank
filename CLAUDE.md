@@ -2,9 +2,30 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Workflow
+
+Follow this for every session; it is the default unless I say otherwise in that session.
+
+**Branching** — do all work on `dev`, branched from `origin/main`. Commit and push to `dev` as you go (`git push -u origin dev`) — every commit, not one squashed push at the end, so I can follow along on the Netlify branch deploy. Never push to `main`: I merge `dev` into `main` myself once I'm happy with it. Don't open a PR unless I ask. If `dev` has already been merged and I ask for something new, reset it onto the latest `main` (`git fetch origin main && git checkout -B dev origin/main`) rather than stacking on merged history.
+
+**Before pushing a UI change**, verify it actually runs — the JSX is compiled in the browser, so a syntax slip or a bad render only surfaces at load time, never at commit time:
+
+1. Serve the repo (`npx -y serve -l 8123 .`, matching `.claude/launch.json`) and drive it with Playwright + the pre-installed Chromium at a phone-sized viewport (~390×844).
+2. Check the console is clean — no Babel compile error, no runtime exception, no unhandled rejection. A blank page with a console error is the normal failure mode here.
+3. Screenshot the screens you changed at that viewport and attach them to your reply.
+4. Run `/code-review` on the working diff and fix what it turns up before committing.
+
+Skip steps 1–3 only for changes with no visual surface (docs, comments, config) — say so when you skip.
+
+**House style**
+
+- Mobile-first: judge every UI change at ~390px wide first. Desktop is secondary; a layout that only looks right on a wide screen is wrong.
+- When a change adds or reshapes structure — a new component, page, storage key, state machine, or catalog — update the Architecture section below in the same commit. It is the map I rely on next session; a stale map is worse than none.
+- Write the code the way it should be. Don't contort a design to preserve the current file layout (see Constraints).
+
 ## Overview
 
-A mobile-first abs workout timer, deployed as a static site (GitHub Pages, per the git history's CNAME commits). The app lives in a single file: `index.html`, alongside an optional `sw.js` (notifications only). There is no build step, no package.json, no linter, and no tests.
+A mobile-first abs workout timer, deployed as a static site (GitHub Pages, per the git history's CNAME commits). The app currently lives in one file, `index.html`, alongside an optional `sw.js` (notifications only) — one file by history, not by rule; see Constraints. There is no build step, no package.json, no linter, and no tests.
 
 ## Running it
 
@@ -30,5 +51,7 @@ Open `index.html` directly in a browser, or serve the directory with any static 
 
 ## Constraints
 
-- Keep everything in `index.html` — the single-file, no-build setup is intentional so the app works as a GitHub Pages page and as a Claude artifact export. The one exception is `sw.js`, which is purely additive: it exists because Android Chrome will only deliver notifications through a service worker registration, it has no `fetch` handler and caches nothing, and when it isn't served (`file://`, artifact export) registration just fails and the page falls back to the `Notification` constructor.
+- **The single file is not sacred.** `index.html` holds everything today, but splitting it up is allowed and preferred once a section gets unwieldy — structure the code the way it should be rather than wedging it into one file. Netlify (`publish = "."`) and GitHub Pages both serve extra files as-is.
+- **No build step, though.** That constraint stays: the site is served straight from the repo root, so anything added has to run in the browser unmodified. Extra JSX goes in `<script type="text/babel" src="...">` tags, which Babel Standalone fetches and compiles at load; note that this needs a real server, so once the JSX leaves `index.html`, opening the page over `file://` stops working (CORS) and "serve the directory" becomes the only way to run it. Update the "Running it" section if that happens.
 - Babel Standalone compiles the JSX in-browser, so avoid syntax beyond what `data-presets="react"` handles.
+- `sw.js` is purely additive: it exists because Android Chrome will only deliver notifications through a service worker registration, it has no `fetch` handler and caches nothing, and when it isn't served (`file://`) registration just fails and the page falls back to the `Notification` constructor.
