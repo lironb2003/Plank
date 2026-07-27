@@ -148,6 +148,25 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
     setSetupView("preview");
   };
 
+  // Build a preset from nothing: an empty workout dropped straight into the
+  // editor with the library already open, since there is nothing to look at
+  // until something is added. It stays unsaved until it's given a name.
+  const startNewPreset = () => {
+    setWorkout([]);
+    setRestBetween(20);
+    setRoundRest(60);
+    setTotalRounds(3);
+    setSelectedId(null);
+    setSelectedName("New workout");
+    setPresetName("");
+    setSaveMsg("");
+    setEdited(true);
+    setLibInfoId(null);
+    setLibQuery("");
+    setShowLibrary(true);
+    setSetupView("edit");
+  };
+
   const removeExercise = (uid) => {
     setWorkout((w) => w.filter((item) => item.uid !== uid));
     setEdited(true);
@@ -759,6 +778,10 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
             )}
           </div>
 
+          <button onClick={startNewPreset} style={{ ...styles.addToggle, marginTop: 12 }}>
+            + New preset
+          </button>
+
         </div>
 
         {confirmDelete && (
@@ -883,7 +906,11 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
             </button>
           )}
 
-          <button onClick={start} style={styles.startBtn}>
+          <button
+            onClick={start}
+            disabled={exercises.length === 0}
+            style={{ ...styles.startBtn, opacity: exercises.length === 0 ? 0.4 : 1 }}
+          >
             START WORKOUT
           </button>
           <button

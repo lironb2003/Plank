@@ -240,18 +240,10 @@ const resolveEntry = (entry) => {
 const BUILTIN_PRESETS = [
   {
     id: "classic",
-    name: "Classic Circuit",
+    name: "Classic",
     exercises: ["plank", "bicycle", "legraise", "mtclimber", "russian"],
     rest: 20,
     roundRest: 75,
-    rounds: 3,
-  },
-  {
-    id: "burner",
-    name: "Core Burner",
-    exercises: ["hollow", "vups", "sideplankL", "sideplankR", "flutter", "plank"],
-    rest: 15,
-    roundRest: 90,
     rounds: 3,
   },
   {
