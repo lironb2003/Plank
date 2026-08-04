@@ -715,7 +715,8 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
     (totalRounds - 1) * roundRest;
   const totalMins = Math.max(1, Math.round(totalWorkoutSecs / 60));
 
-  const allPresets = [...BUILTIN_PRESETS, ...customPresets];
+  // yours first — the built-ins are the fallback, not the headline
+  const allPresets = [...customPresets, ...BUILTIN_PRESETS];
 
   // ================= HOME: PICK A PRESET =================
   if (phase === "idle" && setupView === "home") {
@@ -730,6 +731,12 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
           <h1 style={styles.setupTitle}>Pick your workout.</h1>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 24 }}>
+            {!presetsLoaded && (
+              <React.Fragment>
+                <SkeletonCard />
+                <SkeletonCard delay={0.2} />
+              </React.Fragment>
+            )}
             {(presetsLoaded ? allPresets : BUILTIN_PRESETS).map((p) => {
               const exs = p.exercises.map(resolveEntry).filter(Boolean);
               const mins = Math.max(
@@ -770,12 +777,6 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
                 </div>
               );
             })}
-            {!presetsLoaded && (
-              <React.Fragment>
-                <SkeletonCard />
-                <SkeletonCard delay={0.2} />
-              </React.Fragment>
-            )}
           </div>
 
           <button onClick={startNewPreset} style={{ ...styles.addToggle, marginTop: 12 }}>
