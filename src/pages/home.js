@@ -1,8 +1,10 @@
 // ---- Landing page: pick a section ----
-function HomePage({ onOpenTimer, onOpenGym, user, syncState, onSignIn, onSignOut }) {
+function HomePage({ onOpenTimer, onOpenGym, user, syncState, onSignInGoogle, onSignInEmail, onSignOut }) {
   const [menuOpen, setMenuOpen] = useState(false); // account dropdown (top-right)
+  const [signInOpen, setSignInOpen] = useState(false);
   useEffect(() => {
     setMenuOpen(false); // menu belongs to the previous auth state
+    setSignInOpen(false); // a signed-in user has nothing to sign in to
   }, [user ? user.uid : null]);
 
   const accountLabel = user ? user.displayName || user.email : "";
@@ -73,9 +75,9 @@ function HomePage({ onOpenTimer, onOpenGym, user, syncState, onSignIn, onSignOut
                 </React.Fragment>
               ) : (
                 <button
-                  onClick={onSignIn}
+                  onClick={() => setSignInOpen(true)}
                   style={styles.accountBtn}
-                  title="Sign in with Google to sync your data"
+                  title="Sign in to sync your data"
                 >
                   Sign in
                 </button>
@@ -105,10 +107,17 @@ function HomePage({ onOpenTimer, onOpenGym, user, syncState, onSignIn, onSignOut
         </div>
         {firebaseReady && !user && (
           <div style={styles.signInHint}>
-            Sign in with Google to sync your presets and gym log across devices.
+            Sign in to sync your presets and gym log across devices.
           </div>
         )}
       </div>
+      {signInOpen && (
+        <SignInDialog
+          onClose={() => setSignInOpen(false)}
+          onGoogle={onSignInGoogle}
+          onEmail={onSignInEmail}
+        />
+      )}
     </div>
   );
 }

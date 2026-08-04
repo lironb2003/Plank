@@ -32,7 +32,9 @@ function App() {
     };
   }, []);
 
-  const signIn = async () => {
+  // Both sign-in paths resolve to "" on success (or when there is nothing to
+  // report) and to a message the dialog shows on failure.
+  const signInWithGoogle = async () => {
     try {
       const provider = new firebase.auth.GoogleAuthProvider();
       try {
@@ -48,13 +50,27 @@ function App() {
             e.code === "auth/operation-not-supported-in-this-environment")
         ) {
           await firebase.auth().signInWithRedirect(provider);
-        } else if (!e || e.code !== "auth/popup-closed-by-user") {
-          setSyncState("error");
+        } else if (e && e.code === "auth/popup-closed-by-user") {
+          return "";
+        } else {
+          return authError(e);
         }
       }
     } catch (e) {
-      setSyncState("error");
+      return authError(e);
     }
+    return "";
+  };
+
+  const signInWithEmail = async (email, password, mode) => {
+    try {
+      const auth = firebase.auth();
+      if (mode === "signup") await auth.createUserWithEmailAndPassword(email, password);
+      else await auth.signInWithEmailAndPassword(email, password);
+    } catch (e) {
+      return authError(e);
+    }
+    return "";
   };
 
   const signOut = async () => {
@@ -80,7 +96,8 @@ function App() {
       onOpenGym={() => setPage("gym")}
       user={user}
       syncState={syncState}
-      onSignIn={signIn}
+      onSignInGoogle={signInWithGoogle}
+      onSignInEmail={signInWithEmail}
       onSignOut={signOut}
     />
   );
