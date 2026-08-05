@@ -1,8 +1,9 @@
 // ---- Gym tracker page ----
 // Log gym sessions: fuzzy-search the catalog (EN/HE), record weight × reps
 // per set, and keep a timestamped session history. The in-progress session is
-// persisted under GYM_ACTIVE_KEY so a reload doesn't lose it; set inputs are
-// kept as raw strings while typing and parsed to numbers on finish.
+// persisted under GYM_ACTIVE_KEY so a reload — or a sign-out — doesn't lose
+// it; set inputs are kept as raw strings while typing and parsed to numbers on
+// finish.
 const parseNum = (s) => {
   const n = parseFloat(String(s).replace(",", "."));
   return isFinite(n) && n >= 0 ? n : null;
@@ -52,6 +53,39 @@ const sanitizeActive = (raw) => {
   };
 };
 
+// The active session is stored wrapped: `{ savedAt, session }`. The envelope
+// exists so that *clearing* the session carries a timestamp too — without one,
+// a sign-in can't tell "finished on another device" (cloud is deliberately
+// empty and newer) from "the last write never reached the server before
+// sign-out" (cloud is stale and the live session only exists locally). The
+// second case used to mirror the empty cloud copy down over a real session,
+// which is how a whole logged workout could vanish on sign-out/sign-in.
+const packActive = (session) => JSON.stringify({ savedAt: Date.now(), session: session || null });
+const unpackActive = (raw) => {
+  let v = null;
+  try {
+    v = JSON.parse(raw);
+  } catch (e) {}
+  // Sessions saved before the envelope existed are bare session objects; they
+  // predate anything written now, so they sort oldest.
+  const wrapped = v && typeof v === "object" && !Array.isArray(v) && "session" in v;
+  return {
+    savedAt: wrapped && isFinite(v.savedAt) ? Number(v.savedAt) : 0,
+    session: sanitizeActive(wrapped ? v.session : v),
+  };
+};
+// Cloud only wins ties and anything newer, so a local session that never made
+// it up survives the round trip.
+const pickActive = (cloudRaw, localRaw) => {
+  const c = unpackActive(cloudRaw);
+  const l = unpackActive(localRaw);
+  // An untimestamped empty cloud copy — a missing doc, or one written before
+  // the envelope existed — is no evidence that the session was finished, so it
+  // can't clear a session that's sitting right there locally.
+  if (!c.session && l.session && c.savedAt === 0) return localRaw;
+  return c.savedAt >= l.savedAt ? cloudRaw : localRaw;
+};
+
 const fmtSet = (st) =>
   st.weight != null && st.reps != null
     ? `${st.weight}kg × ${st.reps}`
@@ -86,14 +120,14 @@ function GymTracker({ onHome }) {
       const [s, w, a] = await Promise.all([
         store.get(GYM_SESSIONS_KEY),
         store.get(GYM_WEIGHTS_KEY),
-        store.get(GYM_ACTIVE_KEY),
+        store.get(GYM_ACTIVE_KEY, pickActive),
       ]);
       if (cancelled) return;
       const sess = parse(s, []);
       setSessions(Array.isArray(sess) ? sess : []);
       const wm = parse(w, {});
       setWeights(wm && typeof wm === "object" && !Array.isArray(wm) ? wm : {});
-      const act = sanitizeActive(parse(a, null));
+      const act = unpackActive(a).session;
       if (act) setActive(act);
       setLoaded(true);
     })();
@@ -102,38 +136,51 @@ function GymTracker({ onHome }) {
     };
   }, []);
 
-  // Debounce active-session writes: every keystroke updates state, but the
-  // store (and Firestore, when signed in) only sees one write per pause.
+  // Only typing into a set is debounced — every keystroke updates state, but
+  // the store (and Firestore, when signed in) sees one write per pause.
+  // Structural edits (adding an exercise or a set, removing either) go out
+  // immediately: they're rare enough that a write each is cheap, and they're
+  // the changes that hurt most to lose.
   // pendingRef holds a value scheduled but not yet written (undefined = none),
-  // so it can be flushed if the page hides or the component unmounts mid-wait.
+  // so it can be flushed if the page hides, the user signs out, or the
+  // component unmounts mid-wait.
   const pendingRef = useRef(undefined);
+  const flushActive = () => {
+    if (pendingRef.current === undefined) return;
+    const a = pendingRef.current;
+    pendingRef.current = undefined;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    store.set(GYM_ACTIVE_KEY, packActive(a));
+  };
   const persistActive = (a) => {
     setActive(a);
     pendingRef.current = a;
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      pendingRef.current = undefined;
-      store.set(GYM_ACTIVE_KEY, JSON.stringify(a));
-    }, 600);
+    saveTimer.current = setTimeout(flushActive, 600);
   };
   const persistActiveNow = (a) => {
     setActive(a);
     pendingRef.current = undefined;
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    store.set(GYM_ACTIVE_KEY, JSON.stringify(a));
+    store.set(GYM_ACTIVE_KEY, packActive(a));
   };
 
+  // Registered once. flushActive reads nothing but refs, so the copy captured
+  // on the first render stays correct for the life of the component.
   useEffect(() => {
-    const flush = () => {
-      if (pendingRef.current === undefined) return;
-      const a = pendingRef.current;
-      pendingRef.current = undefined;
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      store.set(GYM_ACTIVE_KEY, JSON.stringify(a));
+    const flush = flushActive;
+    // visibilitychange is what fires when the app is backgrounded on mobile,
+    // where pagehide often never comes at all.
+    const onHide = () => {
+      if (document.hidden) flush();
     };
     window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onHide);
+    const offSignOut = store.onFlush(flush); // sign-out waits on this
     return () => {
       window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onHide);
+      offSignOut();
       flush();
     };
   }, []);
@@ -158,15 +205,15 @@ function GymTracker({ onHome }) {
         },
       ],
     };
-    persistActive({ ...active, entries: [...active.entries, entry] });
+    persistActiveNow({ ...active, entries: [...active.entries, entry] });
     setQuery("");
   };
 
   const removeEntry = (uid) =>
-    persistActive({ ...active, entries: active.entries.filter((en) => en.uid !== uid) });
+    persistActiveNow({ ...active, entries: active.entries.filter((en) => en.uid !== uid) });
 
   const addSet = (entryUid) =>
-    persistActive({
+    persistActiveNow({
       ...active,
       entries: active.entries.map((en) => {
         if (en.uid !== entryUid) return en;
@@ -182,7 +229,7 @@ function GymTracker({ onHome }) {
     });
 
   const removeSet = (entryUid, setUid) =>
-    persistActive({
+    persistActiveNow({
       ...active,
       entries: active.entries.map((en) =>
         en.uid === entryUid ? { ...en, sets: en.sets.filter((st) => st.uid !== setUid) } : en

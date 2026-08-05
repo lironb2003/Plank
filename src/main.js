@@ -103,6 +103,14 @@ function App() {
   };
 
   const signOut = async () => {
+    // Sign-out drops any cloud write the server hasn't acknowledged yet, so
+    // push out what's pending and wait for it first — otherwise work done in
+    // the last moments before signing out (an in-progress gym session, say)
+    // exists only on this device, and the next sign-in reads a stale cloud.
+    try {
+      setSyncState("syncing");
+      await store.flush();
+    } catch (e) {}
     try {
       await firebase.auth().signOut();
     } catch (e) {}

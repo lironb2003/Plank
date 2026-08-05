@@ -77,21 +77,45 @@ const cloudUid = () => {
 const cloudDoc = (uid, key) =>
   firebase.firestore().collection("users").doc(uid).collection("data").doc(key);
 
+// Cloud writes that have been sent but not yet acknowledged by the server.
+// `store.flush()` waits on these: a fire-and-forget write can sit unacked for
+// a long time on a flaky connection, and signing out drops whatever hasn't
+// landed — silently losing the newest data.
+const inflight = new Set();
+
 // The store decides cloud vs local itself, so call sites stay unchanged.
 // Writes go local-first (never lost, never block the UI), then push to
 // Firestore fire-and-forget — an offline Firestore set() doesn't resolve
 // until reconnect, so it must not be awaited on the save path.
 const store = {
   notify: null, // set by the component: ("syncing"|"synced"|"error") => void
-  async get(key) {
+  // Debounced writers register a flusher so a sign-out (or a page going away)
+  // can force their pending value out before the credentials do.
+  flushers: new Set(),
+  onFlush(fn) {
+    store.flushers.add(fn);
+    return () => store.flushers.delete(fn);
+  },
+  // Optional `resolve(cloudRaw, localRaw) => winner` overrides "cloud wins".
+  // Needed wherever a local value can legitimately be newer than the cloud's:
+  // the plain mirror-down below would otherwise overwrite it. Both layers end
+  // up holding the winner, so the next read agrees whichever way it went.
+  async get(key, resolve) {
     const uid = cloudUid();
     if (uid) {
       try {
         const snap = await cloudDoc(uid, key).get();
-        if (snap.exists && snap.data().value != null) {
-          const v = snap.data().value;
-          await localSet(key, v); // mirror down so sign-out keeps current data
-          return v;
+        const cloud = snap.exists && snap.data().value != null ? snap.data().value : null;
+        if (resolve) {
+          const local = await localGet(key);
+          const winner = resolve(cloud, local);
+          if (winner != null && winner !== cloud) store.set(key, winner);
+          else if (winner != null && winner !== local) await localSet(key, winner);
+          return winner;
+        }
+        if (cloud != null) {
+          await localSet(key, cloud); // mirror down so sign-out keeps current data
+          return cloud;
         }
       } catch (e) {
         /* cloud unreachable — fall through to local */
@@ -105,7 +129,7 @@ const store = {
     if (uid) {
       if (store.notify) store.notify("syncing");
       try {
-        cloudDoc(uid, key)
+        const p = cloudDoc(uid, key)
           .set({ value: value, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
           .then(() => {
             if (store.notify) store.notify("synced");
@@ -115,7 +139,11 @@ const store = {
             // connectivity problem — surface it distinctly so it's actionable.
             if (store.notify)
               store.notify(e && e.code === "permission-denied" ? "denied" : "error");
+          })
+          .then(() => {
+            inflight.delete(p);
           });
+        inflight.add(p);
       } catch (e) {
         if (store.notify) store.notify(e && e.code === "permission-denied" ? "denied" : "error");
       }
@@ -125,6 +153,20 @@ const store = {
       } catch (e) {}
     }
     return ok;
+  },
+  // Push out everything pending and wait for the cloud to acknowledge it.
+  // Capped, because a dead network must not leave the caller (sign-out) stuck.
+  async flush(timeoutMs) {
+    store.flushers.forEach((fn) => {
+      try {
+        fn();
+      } catch (e) {}
+    });
+    if (inflight.size === 0) return;
+    await Promise.race([
+      Promise.all(Array.from(inflight)),
+      new Promise((r) => setTimeout(r, timeoutMs == null ? 4000 : timeoutMs)),
+    ]);
   },
 };
 
