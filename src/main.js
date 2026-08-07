@@ -6,6 +6,7 @@ function App() {
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(!firebaseReady); // no firebase => nothing to wait for
   const [syncState, setSyncState] = useState("idle"); // idle | syncing | synced | error | denied
+  const [authNotice, setAuthNotice] = useState(""); // a sign-in failure with no dialog to show it
 
   useEffect(() => {
     store.notify = (s) => setSyncState(s);
@@ -23,6 +24,14 @@ function App() {
         },
         () => setAuthReady(true)
       );
+      // A redirect sign-in navigates away and comes back to a fresh page with
+      // no dialog open, so its failure is only ever reported here. Unread, an
+      // unauthorized-domain redirect just lands on a signed-out page with no
+      // explanation — the exact case email/password exists to solve.
+      firebase
+        .auth()
+        .getRedirectResult()
+        .catch((e) => setAuthNotice(authError(e)));
     } catch (e) {
       setAuthReady(true);
     }
@@ -99,6 +108,8 @@ function App() {
       onSignInGoogle={signInWithGoogle}
       onSignInEmail={signInWithEmail}
       onSignOut={signOut}
+      authNotice={authNotice}
+      onClearAuthNotice={() => setAuthNotice("")}
     />
   );
 }

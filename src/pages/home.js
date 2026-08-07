@@ -1,11 +1,25 @@
 // ---- Landing page: pick a section ----
-function HomePage({ onOpenTimer, onOpenGym, user, syncState, onSignInGoogle, onSignInEmail, onSignOut }) {
+function HomePage({
+  onOpenTimer,
+  onOpenGym,
+  user,
+  syncState,
+  onSignInGoogle,
+  onSignInEmail,
+  onSignOut,
+  authNotice,
+  onClearAuthNotice,
+}) {
   const [menuOpen, setMenuOpen] = useState(false); // account dropdown (top-right)
   const [signInOpen, setSignInOpen] = useState(false);
   useEffect(() => {
     setMenuOpen(false); // menu belongs to the previous auth state
     setSignInOpen(false); // a signed-in user has nothing to sign in to
   }, [user ? user.uid : null]);
+  // A redirect that failed has no dialog to report into — reopen one for it.
+  useEffect(() => {
+    if (authNotice && !user) setSignInOpen(true);
+  }, [authNotice, user]);
 
   const accountLabel = user ? user.displayName || user.email : "";
   const renderAvatar = (photoStyle, fallbackStyle) =>
@@ -113,9 +127,13 @@ function HomePage({ onOpenTimer, onOpenGym, user, syncState, onSignInGoogle, onS
       </div>
       {signInOpen && (
         <SignInDialog
-          onClose={() => setSignInOpen(false)}
+          onClose={() => {
+            setSignInOpen(false);
+            onClearAuthNotice();
+          }}
           onGoogle={onSignInGoogle}
           onEmail={onSignInEmail}
+          initialError={authNotice}
         />
       )}
     </div>

@@ -28,12 +28,14 @@ const authError = (e) => {
   return AUTH_ERRORS[code] || (code ? `Sign-in failed (${code}).` : "Sign-in failed.");
 };
 
-function SignInDialog({ onClose, onGoogle, onEmail }) {
+// `initialError` carries a failure that happened while no dialog was open —
+// a redirect sign-in reports its result on the next page load, not inline.
+function SignInDialog({ onClose, onGoogle, onEmail, initialError }) {
   const [mode, setMode] = useState("signin"); // signin | signup
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
+  const [err, setErr] = useState(initialError || "");
   const signup = mode === "signup";
 
   useEffect(() => {
@@ -46,14 +48,16 @@ function SignInDialog({ onClose, onGoogle, onEmail }) {
 
   // Both handlers resolve to an error message or "" — a success unmounts this
   // dialog via the auth state change, so there is no success path to render.
+  // "" is not proof of a sign-in though: dismissing the Google popup reports
+  // nothing, and the dialog stays up, so the form has to be handed back either
+  // way or it locks. (Releasing it after a real success is a no-op — the
+  // component is already gone.)
   const run = async (fn) => {
     setBusy(true);
     setErr("");
     const message = await fn();
-    if (message) {
-      setErr(message);
-      setBusy(false);
-    }
+    setBusy(false);
+    if (message) setErr(message);
   };
 
   const submit = (e) => {
