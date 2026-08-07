@@ -6,6 +6,7 @@ function HomePage({
   syncState,
   onSignInGoogle,
   onSignInEmail,
+  onResetPassword,
   onSignOut,
   authNotice,
   onClearAuthNotice,
@@ -133,6 +134,7 @@ function HomePage({
           }}
           onGoogle={onSignInGoogle}
           onEmail={onSignInEmail}
+          onReset={onResetPassword}
           initialError={authNotice}
         />
       )}

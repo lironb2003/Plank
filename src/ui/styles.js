@@ -226,6 +226,27 @@ const styles = {
     outline: "none",
     boxSizing: "border-box",
   },
+  authForgotRow: { display: "flex", justifyContent: "flex-end", marginTop: 2 },
+  authForgot: {
+    display: "flex",
+    alignItems: "center",
+    minHeight: 44, // a thumb's worth: a near miss below this hits the password field
+    padding: "0 6px",
+    background: "none",
+    border: "none",
+    color: "#8FA3BF",
+    fontSize: 12,
+    fontWeight: 700,
+    fontFamily: "inherit",
+    cursor: "pointer",
+  },
+  authNotice: {
+    marginTop: 12,
+    fontSize: 13,
+    fontWeight: 600,
+    color: "#7FD1A7",
+    lineHeight: 1.4,
+  },
   authError: {
     marginTop: 12,
     fontSize: 13,

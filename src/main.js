@@ -82,6 +82,26 @@ function App() {
     return "";
   };
 
+  // No ActionCodeSettings on purpose. The default reset link lands on
+  // Firebase's own <authDomain>/__/auth/action handler, which is not this
+  // origin and so needs no authorized domain — meaning a reset works from a
+  // branch preview like everything else here. Passing a continueUrl back to
+  // the app would put that URL through the domain check and reintroduce the
+  // exact failure email/password sign-in exists to sidestep.
+  const sendPasswordReset = async (email) => {
+    try {
+      await firebase.auth().sendPasswordResetEmail(email);
+    } catch (e) {
+      // An unregistered address is reported as success. Firebase's email
+      // enumeration protection normally hides it, but it is a project setting
+      // that can be off — and the dialog's "if that email has an account"
+      // wording is only honest if nothing else here confirms the answer.
+      if (e && e.code === "auth/user-not-found") return "";
+      return authError(e, "Password reset");
+    }
+    return "";
+  };
+
   const signOut = async () => {
     try {
       await firebase.auth().signOut();
@@ -107,6 +127,7 @@ function App() {
       syncState={syncState}
       onSignInGoogle={signInWithGoogle}
       onSignInEmail={signInWithEmail}
+      onResetPassword={sendPasswordReset}
       onSignOut={signOut}
       authNotice={authNotice}
       onClearAuthNotice={() => setAuthNotice("")}

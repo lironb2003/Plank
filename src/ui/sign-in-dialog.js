@@ -10,6 +10,7 @@
 // actually act on and fall back to the raw code so nothing is swallowed.
 const AUTH_ERRORS = {
   "auth/invalid-email": "That email doesn't look right.",
+  "auth/missing-email": "Enter your email above first, then tap this again.",
   "auth/missing-password": "Enter a password.",
   "auth/weak-password": "Use at least 6 characters.",
   "auth/email-already-in-use": "That email already has an account — sign in instead.",
@@ -23,19 +24,23 @@ const AUTH_ERRORS = {
   "auth/operation-not-allowed": "Email sign-in isn't enabled for this project yet.",
   "auth/unauthorized-domain": "Google sign-in isn't allowed on this URL — use email and password below.",
 };
-const authError = (e) => {
+// `what` names the action for the unmapped-code fallback, so a reset failure
+// doesn't report itself as a failed sign-in.
+const authError = (e, what) => {
   const code = e && e.code ? e.code : "";
-  return AUTH_ERRORS[code] || (code ? `Sign-in failed (${code}).` : "Sign-in failed.");
+  const label = what || "Sign-in";
+  return AUTH_ERRORS[code] || (code ? `${label} failed (${code}).` : `${label} failed.`);
 };
 
 // `initialError` carries a failure that happened while no dialog was open —
 // a redirect sign-in reports its result on the next page load, not inline.
-function SignInDialog({ onClose, onGoogle, onEmail, initialError }) {
+function SignInDialog({ onClose, onGoogle, onEmail, onReset, initialError }) {
   const [mode, setMode] = useState("signin"); // signin | signup
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(initialError || "");
+  const [notice, setNotice] = useState(""); // reset-sent confirmation, not a failure
   const signup = mode === "signup";
 
   useEffect(() => {
@@ -55,6 +60,7 @@ function SignInDialog({ onClose, onGoogle, onEmail, initialError }) {
   const run = async (fn) => {
     setBusy(true);
     setErr("");
+    setNotice("");
     const message = await fn();
     setBusy(false);
     if (message) setErr(message);
@@ -64,6 +70,27 @@ function SignInDialog({ onClose, onGoogle, onEmail, initialError }) {
     e.preventDefault();
     if (busy || !email.trim() || !password) return;
     run(() => onEmail(email.trim(), password, mode));
+  };
+
+  // The reset mail goes to whatever is in the email field, so it needs one.
+  // Success is deliberately worded as a maybe: with email-enumeration
+  // protection on (Firebase's default), sending resolves the same way whether
+  // or not the address has an account, and claiming otherwise would both lie
+  // to the user and leak which addresses are registered.
+  const forgot = async () => {
+    const address = email.trim();
+    if (!address) {
+      setNotice("");
+      setErr(AUTH_ERRORS["auth/missing-email"]);
+      return;
+    }
+    setBusy(true);
+    setErr("");
+    setNotice("");
+    const message = await onReset(address);
+    setBusy(false);
+    if (message) setErr(message);
+    else setNotice(`If ${address} has an account, a reset link is on its way. Check spam too.`);
   };
 
   return (
@@ -117,8 +144,25 @@ function SignInDialog({ onClose, onGoogle, onEmail, initialError }) {
             placeholder={signup ? "At least 6 characters" : "••••••••"}
             style={styles.authInput}
           />
+          {!signup && (
+            <div style={styles.authForgotRow}>
+              <button
+                type="button"
+                onClick={forgot}
+                disabled={busy}
+                style={{ ...styles.authForgot, opacity: busy ? 0.5 : 1 }}
+              >
+                Forgot password?
+              </button>
+            </div>
+          )}
 
-          {err && <div style={styles.authError}>{err}</div>}
+          {/* Both outcomes are announced: the reset confirmation has no other
+              visible effect, so a screen reader would otherwise miss it. */}
+          <div aria-live="polite">
+            {notice && <div style={styles.authNotice}>{notice}</div>}
+            {err && <div style={styles.authError}>{err}</div>}
+          </div>
 
           <button
             type="submit"
@@ -137,6 +181,7 @@ function SignInDialog({ onClose, onGoogle, onEmail, initialError }) {
           onClick={() => {
             setMode(signup ? "signin" : "signup");
             setErr("");
+            setNotice("");
           }}
           style={styles.authSwitch}
         >
