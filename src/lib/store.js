@@ -123,7 +123,10 @@ const store = {
     }
     return localGet(key);
   },
-  async set(key, value) {
+  // opts.dirty: false for writes that aren't preset data (sound settings, say).
+  // The dirty flag exists to force a preset re-merge after signed-out edits, and
+  // a needless re-merge can resurrect a preset deleted on another device.
+  async set(key, value, opts) {
     const ok = await localSet(key, value);
     const uid = cloudUid();
     if (uid) {
@@ -147,7 +150,7 @@ const store = {
       } catch (e) {
         if (store.notify) store.notify(e && e.code === "permission-denied" ? "denied" : "error");
       }
-    } else {
+    } else if (!opts || opts.dirty !== false) {
       try {
         window.localStorage.setItem(LOCAL_DIRTY_KEY, "1");
       } catch (e) {}

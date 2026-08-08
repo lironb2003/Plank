@@ -674,6 +674,29 @@ const styles = {
   dots: { display: "flex", gap: 10, marginTop: 24, flexWrap: "wrap", justifyContent: "center" },
   dot: { width: 12, height: 12, borderRadius: "50%" },
   upNext: { marginTop: 24, fontSize: 13, fontWeight: 700, letterSpacing: "0.15em" },
+  // Volume: shared by the setup preview and the running screen, which is why
+  // the accent color is passed in at the call site rather than set here.
+  volumeRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    width: "100%",
+    maxWidth: 480,
+    margin: "0 auto",
+    boxSizing: "border-box",
+  },
+  volumeRowActive: { padding: "0 24px 18px" },
+  soundHint: { fontSize: 12, color: "#8FA3BF", marginTop: 8, lineHeight: 1.4 },
+  volumeIcon: { fontSize: 15, lineHeight: 1, opacity: 0.9 },
+  // A native range input: `accentColor` is the one hook that themes the track
+  // and thumb from an inline style, with no pseudo-element rules to write.
+  volumeSlider: {
+    flex: 1,
+    minWidth: 0,
+    height: 22,
+    cursor: "pointer",
+    background: "transparent",
+  },
   controls: {
     display: "flex",
     gap: 12,

@@ -56,6 +56,8 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
   const [finishedSecs, setFinishedSecs] = useState(0);
   const [running, setRunning] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
+  const [cuePack, setCuePack] = useState(DEFAULT_CUE_PACK);
+  const [volume, setVolume] = useState(DEFAULT_VOLUME);
   const [notifyOn, setNotifyOn] = useState(true);
   const [notifyPerm, setNotifyPerm] = useState(() =>
     notifySupported() ? Notification.permission : "unsupported"
@@ -74,6 +76,9 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
   const swRegRef = useRef(null);
   const notifRef = useRef(null);
   const notifyOnRef = useRef(true);
+  const volumeSaveRef = useRef(null); // debounce timer for volume writes
+  const volumeRef = useRef(DEFAULT_VOLUME); // latest value, for the pending write
+  const soundTouchedRef = useRef(false); // user changed pack/volume: don't clobber it on load
 
   const exercises = workout
     .map((w) => {
@@ -143,6 +148,67 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
 
   const persistPresets = async (presets) => {
     await store.set(STORAGE_KEY, JSON.stringify(presets));
+  };
+
+  // ---- Sound preferences (cue pack + volume) ----
+  // Same store as the presets, so a signed-in user's choice follows them to
+  // their other devices. Unknown/legacy values fall back to the defaults. The
+  // load is async and the controls are live before it lands, so a choice the
+  // user already made wins over whatever comes back.
+  useEffect(() => {
+    if (!authReady) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [pack, vol] = await Promise.all([store.get(CUE_PACK_KEY), store.get(VOLUME_KEY)]);
+        if (cancelled || soundTouchedRef.current) return;
+        if (pack && CUE_PACKS.some((p) => p.id === pack)) setCuePack(pack);
+        const v = parseFloat(vol);
+        if (isFinite(v)) {
+          setVolume(Math.max(0, Math.min(1, v)));
+          volumeRef.current = v;
+          if (v === 0) setSoundOn(false); // a stored zero is a mute, not a silent "on"
+        }
+      } catch (e) {
+        /* keep the defaults */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, user ? user.uid : null]);
+
+  // The master gain owns the level, so this also re-levels cues already queued.
+  useEffect(() => {
+    setMasterVolume(volume);
+  }, [volume]);
+
+  // Sound settings aren't preset data: writing them must not mark the local
+  // store dirty, or the next sign-in re-merges presets it has no reason to.
+  const persistSound = (key, value) => store.set(key, value, { dirty: false });
+
+  const chooseCuePack = (id) => {
+    soundTouchedRef.current = true;
+    setCuePack(id);
+    // We're inside the tap, so the context is allowed to start. Muted means
+    // muted, though — picking a pack then stays silent until sound is back on.
+    if (soundOn && volume > 0) previewCue(id, "go");
+    persistSound(CUE_PACK_KEY, id);
+  };
+
+  // Dragging fires continuously; the state is live but the write waits for the
+  // drag to settle. Muted + a drag away from zero means "unmute at this level".
+  const changeVolume = (v) => {
+    soundTouchedRef.current = true;
+    setVolume(v);
+    volumeRef.current = v;
+    if (v > 0 && !soundOn) setSoundOn(true);
+    if (v === 0 && soundOn) setSoundOn(false);
+    if (volumeSaveRef.current) clearTimeout(volumeSaveRef.current);
+    volumeSaveRef.current = setTimeout(() => {
+      volumeSaveRef.current = null;
+      persistSound(VOLUME_KEY, String(volumeRef.current));
+    }, 500);
   };
 
   // ---- Preset / builder actions ----
@@ -355,7 +421,7 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
       const origin = ctx.currentTime - elapsed; // audio-clock time of elapsed 0
       const emit = (at, name) => {
         if (at <= from || at > to) return;
-        cuesRef.current = cuesRef.current.concat(playCue(ctx, name, origin + at));
+        cuesRef.current = cuesRef.current.concat(playCue(ctx, name, origin + at, cuePack));
       };
       // Nothing at or past an open rep set can be queued: its end is whenever
       // the user taps, and every start behind it is provisional until then.
@@ -373,7 +439,7 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
       cueUntilRef.current = to;
       if (cuesRef.current.length > 400) cuesRef.current = cuesRef.current.slice(-200);
     },
-    [soundOn]
+    [soundOn, cuePack]
   );
 
   // ---- Background keep-alive ----
@@ -618,12 +684,40 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
     };
   }, [cancelCues, nowElapsed, startKeepAlive, requestWakeLock]);
 
-  // Muting has to cancel what is already queued, unmuting has to re-queue.
+  // Muting has to cancel what is already queued, unmuting has to re-queue —
+  // and so does switching packs, since the queue reaches minutes ahead and
+  // would otherwise keep playing the old sounds. Volume doesn't: it rides the
+  // master gain, which the queued nodes are already connected to.
   useEffect(() => {
     cancelCues();
     cueUntilRef.current = nowElapsed();
     syncRef.current();
-  }, [soundOn, cancelCues, nowElapsed]);
+  }, [soundOn, cuePack, cancelCues, nowElapsed]);
+
+  // A pending volume write must not die with the page. `pagehide` is the only
+  // event mobile reliably fires before discarding a backgrounded tab, and
+  // `store.onFlush` is how a sign-out waits for debounced writers before it
+  // drops the credentials the cloud write needs.
+  useEffect(() => {
+    const flush = () => {
+      if (!volumeSaveRef.current) return;
+      clearTimeout(volumeSaveRef.current);
+      volumeSaveRef.current = null;
+      persistSound(VOLUME_KEY, String(volumeRef.current));
+    };
+    const onHide = () => {
+      if (document.hidden) flush();
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onHide);
+    const offSignOut = store.onFlush(flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onHide);
+      offSignOut();
+      flush();
+    };
+  }, []);
 
   useEffect(
     () => () => {
@@ -654,9 +748,9 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
       if (!soundOn) return;
       const ctx = audioCtx();
       if (!ctx) return;
-      cuesRef.current = cuesRef.current.concat(playCue(ctx, name, ctx.currentTime));
+      cuesRef.current = cuesRef.current.concat(playCue(ctx, name, ctx.currentTime, cuePack));
     },
-    [soundOn]
+    [soundOn, cuePack]
   );
 
   const start = () => {
@@ -764,6 +858,16 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
     seekTo(sched.starts[target]);
   };
 
+  // Unmuting at zero would be a silent "on", so it also lifts the slider.
+  const toggleSound = () => {
+    if (soundOn) {
+      setSoundOn(false);
+      return;
+    }
+    setSoundOn(true);
+    if (volume === 0) changeVolume(DEFAULT_VOLUME);
+  };
+
   const toggleNotify = () => {
     if (notifyOn) {
       setNotifyOn(false);
@@ -788,6 +892,9 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
       : null;
 
   const progress = 1 - timeLeft / Math.max(1, phaseTotal);
+  const activePack = cuePackById(cuePack);
+  // Muted reads as zero on the bar, so dragging up is also how you unmute.
+  const volumePct = soundOn ? Math.round(volume * 100) : 0;
   // wanted *and* allowed — a browser-level block wins over the in-app toggle
   const notifyAlertsOn = notifyOn && notifyPerm !== "denied";
 
@@ -964,6 +1071,43 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
               <span style={styles.timingValue}>{totalRounds}</span>
               <span style={styles.timingLabel}>rounds</span>
             </div>
+          </div>
+
+          <div style={styles.sectionLabel}>SOUNDS</div>
+          <div style={styles.groupChips}>
+            {CUE_PACKS.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => chooseCuePack(p.id)}
+                aria-pressed={cuePack === p.id}
+                style={{
+                  ...styles.groupChip,
+                  borderColor: cuePack === p.id ? "#5B8DEF" : "#3B4A63",
+                  color: cuePack === p.id ? "#5B8DEF" : "#8FA3BF",
+                }}
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+          <div style={styles.soundHint}>{activePack.blurb} Tap a name to hear it.</div>
+          <div style={{ ...styles.volumeRow, marginTop: 14 }}>
+            <span style={styles.volumeIcon} aria-hidden="true">
+              🔈
+            </span>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="5"
+              value={volumePct}
+              onChange={(e) => changeVolume(Number(e.target.value) / 100)}
+              aria-label="Cue volume"
+              style={{ ...styles.volumeSlider, accentColor: "#5B8DEF" }}
+            />
+            <span style={styles.volumeIcon} aria-hidden="true">
+              🔊
+            </span>
           </div>
 
           {notifyPerm !== "unsupported" && (
@@ -1344,7 +1488,7 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
           ROUND {round}/{totalRounds}
         </span>
         <button
-          onClick={() => setSoundOn((s) => !s)}
+          onClick={toggleSound}
           style={{ ...styles.iconBtn, color: theme.accent }}
           aria-label={soundOn ? "Mute sounds" : "Unmute sounds"}
         >
@@ -1421,6 +1565,25 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
             UP NEXT — {nextEx.name} · {isReps ? `${nextEx.reps} reps` : `${nextEx.duration}s`}
           </div>
         )}
+      </div>
+
+      <div style={{ ...styles.volumeRow, ...styles.volumeRowActive }}>
+        <span style={{ ...styles.volumeIcon, color: theme.accent }} aria-hidden="true">
+          {volumePct === 0 ? "🔇" : "🔈"}
+        </span>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          step="5"
+          value={volumePct}
+          onChange={(e) => changeVolume(Number(e.target.value) / 100)}
+          aria-label="Cue volume"
+          style={{ ...styles.volumeSlider, accentColor: theme.accent }}
+        />
+        <span style={{ ...styles.volumeIcon, color: theme.accent }} aria-hidden="true">
+          🔊
+        </span>
       </div>
 
       <div style={styles.controls}>
