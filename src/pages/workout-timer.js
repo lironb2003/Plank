@@ -16,6 +16,9 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
   // ---- Setup flow: home (pick preset) → preview → edit ----
   const [setupView, setSetupView] = useState("home");
   const [workout, setWorkout] = useState(() => withUids(BUILTIN_PRESETS[0].exercises));
+  // "time": every exercise runs for its duration. "reps": every exercise is a
+  // rep target that ends when you tap the screen.
+  const [mode, setMode] = useState("time");
   const [restBetween, setRestBetween] = useState(BUILTIN_PRESETS[0].rest);
   const [roundRest, setRoundRest] = useState(BUILTIN_PRESETS[0].roundRest);
   const [totalRounds, setTotalRounds] = useState(BUILTIN_PRESETS[0].rounds);
@@ -47,6 +50,10 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
   const [exIndex, setExIndex] = useState(0);
   const [timeLeft, setTimeLeft] = useState(GET_READY);
   const [phaseTotal, setPhaseTotal] = useState(GET_READY);
+  // A rep set counts up and waits for a tap instead of counting down.
+  const [openSet, setOpenSet] = useState(false);
+  const [setElapsed, setSetElapsed] = useState(0);
+  const [finishedSecs, setFinishedSecs] = useState(0);
   const [running, setRunning] = useState(false);
   const [soundOn, setSoundOn] = useState(true);
   const [notifyOn, setNotifyOn] = useState(true);
@@ -55,7 +62,7 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
   );
 
   const wakeLockRef = useRef(null);
-  const scheduleRef = useRef({ segs: [], starts: [], total: 0 });
+  const scheduleRef = useRef({ segs: [], starts: [], total: 0, openIndex: -1 });
   // { base: elapsed seconds at `at`, at: epoch ms | null when paused }
   const clockRef = useRef({ base: 0, at: null });
   const runningRef = useRef(false);
@@ -76,9 +83,11 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
         ...ex,
         uid: w.uid,
         duration: w.duration != null ? w.duration : ex.duration,
+        reps: w.reps != null ? w.reps : DEFAULT_REPS,
       };
     })
     .filter(Boolean);
+  const isReps = mode === "reps";
 
   const isCustomSelected = customPresets.some((p) => p.id === selectedId);
 
@@ -139,6 +148,7 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
   // ---- Preset / builder actions ----
   const choosePreset = (p) => {
     setWorkout(withUids(p.exercises));
+    setMode(p.mode === "reps" ? "reps" : "time");
     setRestBetween(p.rest);
     setRoundRest(p.roundRest);
     setTotalRounds(p.rounds);
@@ -153,6 +163,7 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
   // until something is added. It stays unsaved until it's given a name.
   const startNewPreset = () => {
     setWorkout([]);
+    setMode("time");
     setRestBetween(20);
     setRoundRest(60);
     setTotalRounds(3);
@@ -188,12 +199,28 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
     setEdited(true);
   };
 
+  const changeReps = (uid, delta) => {
+    setWorkout((w) =>
+      w.map((item) => {
+        if (item.uid !== uid) return item;
+        const base = item.reps != null ? item.reps : DEFAULT_REPS;
+        return { ...item, reps: Math.max(1, Math.min(100, base + delta)) };
+      })
+    );
+    setEdited(true);
+  };
+
+  // Both a duration and a rep count survive into the saved entry, so a preset
+  // switched to reps and back still has the durations it was tuned with.
   const currentConfig = () => ({
+    mode,
     exercises: workout.map((w) => {
       const base = byId(w.exId);
-      return w.duration == null || (base && w.duration === base.duration)
-        ? w.exId
-        : { id: w.exId, duration: w.duration };
+      const entry = { id: w.exId };
+      if (w.duration != null && !(base && w.duration === base.duration))
+        entry.duration = w.duration;
+      if (w.reps != null && w.reps !== DEFAULT_REPS) entry.reps = w.reps;
+      return entry.duration == null && entry.reps == null ? w.exId : entry;
     }),
     rest: restBetween,
     roundRest,
@@ -321,7 +348,7 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
       if (!soundOn) return;
       const ctx = audioCtx();
       if (!ctx) return;
-      const { segs, starts } = scheduleRef.current;
+      const { segs, starts, openIndex } = scheduleRef.current;
       const from = Math.max(cueUntilRef.current, elapsed);
       const to = elapsed + CUE_HORIZON;
       if (to <= from) return;
@@ -330,7 +357,10 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
         if (at <= from || at > to) return;
         cuesRef.current = cuesRef.current.concat(playCue(ctx, name, origin + at));
       };
-      for (let i = 0; i < segs.length; i++) {
+      // Nothing at or past an open rep set can be queued: its end is whenever
+      // the user taps, and every start behind it is provisional until then.
+      const limit = openIndex >= 0 ? openIndex : segs.length;
+      for (let i = 0; i < limit; i++) {
         const end = starts[i] + segs[i].dur;
         if (end < from || end - 3 > to) continue;
         // 3 · 2 · 1 landing exactly on the second, then the boundary cue
@@ -479,6 +509,8 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
       setRunning(false);
       setPhase("done");
       setTimeLeft(0);
+      setOpenSet(false);
+      setFinishedSecs(Math.round(sched.total));
       stopKeepAlive();
       if (lastSegRef.current !== i) {
         lastSegRef.current = i;
@@ -487,16 +519,23 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
       return;
     }
     const seg = sched.segs[i];
+    const open = !!seg.open;
     setPhase(seg.kind);
     setRound(seg.round);
     setExIndex(seg.exIndex);
-    setPhaseTotal(seg.dur);
-    setTimeLeft(Math.max(0, Math.ceil(sched.starts[i] + seg.dur - el)));
+    setOpenSet(open);
+    // An open rep set has no end to count down to, so it counts up instead and
+    // leaves the progress bar with nothing to fill.
+    setPhaseTotal(open ? 0 : seg.dur);
+    setSetElapsed(open ? Math.max(0, Math.floor(el - sched.starts[i])) : 0);
+    setTimeLeft(open ? 0 : Math.max(0, Math.ceil(sched.starts[i] + seg.dur - el)));
     if (i !== lastSegRef.current) {
       lastSegRef.current = i;
       notify(
-        `${seg.label} · ${seg.dur}s`,
-        seg.kind === "work"
+        open ? `${seg.label} · ${seg.reps} reps` : `${seg.label} · ${seg.dur}s`,
+        open
+          ? `Round ${seg.round}/${sched.rounds} · tap the screen when the set is done`
+          : seg.kind === "work"
           ? `Round ${seg.round}/${sched.rounds}`
           : seg.next
           ? `Up next: ${seg.next}`
@@ -608,9 +647,21 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
     [cancelCues]
   );
 
+  // Play a cue at the playhead rather than queueing it ahead. A tap has no
+  // schedulable time to sit at — the boundary it creates is "now".
+  const playNow = useCallback(
+    (name) => {
+      if (!soundOn) return;
+      const ctx = audioCtx();
+      if (!ctx) return;
+      cuesRef.current = cuesRef.current.concat(playCue(ctx, name, ctx.currentTime));
+    },
+    [soundOn]
+  );
+
   const start = () => {
     if (exercises.length === 0) return;
-    scheduleRef.current = buildSchedule(exercises, restBetween, roundRest, totalRounds);
+    scheduleRef.current = buildSchedule(exercises, restBetween, roundRest, totalRounds, mode);
     cancelCues();
     cueUntilRef.current = 0;
     lastSegRef.current = 0; // don't announce "get in position" — they just tapped it
@@ -624,7 +675,30 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
     setExIndex(0);
     setTimeLeft(GET_READY);
     setPhaseTotal(GET_READY);
+    setOpenSet(false);
+    setSetElapsed(0);
+    setFinishedSecs(0);
     setRunning(true);
+  };
+
+  // The tap that ends a rep set. Stamping the set's real length in moves every
+  // later segment into place, which changes the cue layout from here on — so
+  // this reshuffles queued audio exactly the way a seek does, and plays the
+  // boundary cue the tap just created itself.
+  const finishSet = () => {
+    const sched = scheduleRef.current;
+    const i = sched.openIndex;
+    // Only the set the playhead is actually inside can be finished. A stray
+    // second tap — the screen is a big target, and the rest screen replaces it
+    // — would otherwise close the *next* set at zero length and skip it.
+    const el = nowElapsed();
+    if (i < 0 || el < sched.starts[i]) return;
+    closeOpenSegment(sched, el);
+    cancelCues();
+    cueUntilRef.current = el;
+    const next = sched.segs[i + 1];
+    playNow(!next ? "done" : next.kind === "work" ? "go" : "rest");
+    syncRef.current();
   };
 
   const togglePause = () => {
@@ -641,16 +715,22 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
     }
   };
 
+  // Skipping an open rep set is the same act as finishing it — there is no end
+  // to jump to until the set has one.
   const skip = () => {
     const sched = scheduleRef.current;
     const i = segmentAt(sched, nowElapsed());
+    if (i === sched.openIndex) {
+      finishSet();
+      return;
+    }
     seekTo(i >= sched.segs.length ? sched.total : sched.starts[i] + sched.segs[i].dur);
   };
 
   const reset = () => {
     cancelCues();
     stopKeepAlive();
-    scheduleRef.current = { segs: [], starts: [], total: 0, rounds: 1 };
+    scheduleRef.current = { segs: [], starts: [], total: 0, openIndex: -1, rounds: 1 };
     clockRef.current = { base: 0, at: null };
     cueUntilRef.current = 0;
     lastSegRef.current = -1;
@@ -660,23 +740,28 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
     setExIndex(0);
     setTimeLeft(GET_READY);
     setPhaseTotal(GET_READY);
+    setOpenSet(false);
+    setSetElapsed(0);
   };
 
   // "Back" means the previous exercise: from a rest, the one you just finished;
   // from an exercise, the one before it. Restarts the current segment when
-  // there is nothing earlier to go to.
+  // there is nothing earlier to go to. Stepping back over finished rep sets
+  // reopens them, so they wait for a fresh tap rather than replaying the length
+  // they happened to take the first time.
   const goBack = () => {
     const sched = scheduleRef.current;
     if (!sched.segs.length) return;
     const i = Math.min(segmentAt(sched, nowElapsed()), sched.segs.length - 1);
-    let target = sched.starts[i];
+    let target = i;
     for (let j = i - 1; j >= 0; j--) {
       if (sched.segs[j].kind === "work") {
-        target = sched.starts[j];
+        target = j;
         break;
       }
     }
-    seekTo(target);
+    reopenFrom(sched, target);
+    seekTo(sched.starts[target]);
   };
 
   const toggleNotify = () => {
@@ -708,12 +793,20 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
 
   const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
+  // Only a timed workout has a length that can be known before it's run: a reps
+  // workout is exactly as long as the sets take, so it advertises none.
   const totalWorkoutSecs =
     GET_READY +
     totalRounds * exercises.reduce((a, e) => a + e.duration, 0) +
     totalRounds * Math.max(0, exercises.length - 1) * restBetween +
     (totalRounds - 1) * roundRest;
   const totalMins = Math.max(1, Math.round(totalWorkoutSecs / 60));
+  const doneMins = Math.max(1, Math.round((finishedSecs || totalWorkoutSecs) / 60));
+
+  // "5 exercises · 3 rounds · ~12 min", the last part only when it's knowable.
+  const summaryLine = (count, rounds, mins) =>
+    `${count} exercise${count !== 1 ? "s" : ""} · ${rounds} round${rounds !== 1 ? "s" : ""}` +
+    (mins == null ? " · reps" : ` · ~${mins} min`);
 
   // yours first — the built-ins are the fallback, not the headline
   const allPresets = [...customPresets, ...BUILTIN_PRESETS];
@@ -739,26 +832,29 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
             )}
             {(presetsLoaded ? allPresets : BUILTIN_PRESETS).map((p) => {
               const exs = p.exercises.map(resolveEntry).filter(Boolean);
-              const mins = Math.max(
-                1,
-                Math.round(
-                  (GET_READY +
-                    p.rounds * exs.reduce((a, e) => a + e.duration, 0) +
-                    p.rounds * Math.max(0, exs.length - 1) * p.rest +
-                    (p.rounds - 1) * p.roundRest) /
-                    60
-                )
-              );
+              const repsPreset = p.mode === "reps";
+              const mins = repsPreset
+                ? null
+                : Math.max(
+                    1,
+                    Math.round(
+                      (GET_READY +
+                        p.rounds * exs.reduce((a, e) => a + e.duration, 0) +
+                        p.rounds * Math.max(0, exs.length - 1) * p.rest +
+                        (p.rounds - 1) * p.roundRest) /
+                        60
+                    )
+                  );
               return (
                 <div key={p.id} style={styles.presetCard} onClick={() => choosePreset(p)}>
                   <div style={{ flex: 1 }}>
                     <div style={styles.presetCardName}>
                       {p.name}
                       {p.custom && <span style={styles.customBadge}>YOURS</span>}
+                      {repsPreset && <span style={styles.repsBadge}>REPS</span>}
                     </div>
                     <div style={styles.presetCardMeta}>
-                      {exs.length} exercise{exs.length !== 1 ? "s" : ""} · {p.rounds} round
-                      {p.rounds !== 1 ? "s" : ""} · ~{mins} min
+                      {summaryLine(exs.length, p.rounds, mins)}
                     </div>
                   </div>
                   {p.custom && (
@@ -828,10 +924,13 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
             {edited && <span style={styles.editedTag}> · edited</span>}
           </h1>
           <div style={styles.previewMeta}>
-            {exercises.length} exercise{exercises.length !== 1 ? "s" : ""} · {totalRounds} round
-            {totalRounds !== 1 ? "s" : ""} · ~{totalMins} min
+            {summaryLine(exercises.length, totalRounds, isReps ? null : totalMins)}
           </div>
-          <div style={styles.previewHint}>Tap an exercise to see how it's done</div>
+          <div style={styles.previewHint}>
+            {isReps
+              ? "Each set ends when you tap the screen · tap an exercise to see how it's done"
+              : "Tap an exercise to see how it's done"}
+          </div>
 
           <div style={{ ...styles.exList, marginTop: 24 }}>
             {exercises.map((ex, i) => (
@@ -845,7 +944,7 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
                     {ex.name}
                     <span style={styles.infoIcon}>{infoUid === ex.uid ? "▾" : "ⓘ"}</span>
                   </span>
-                  <span style={styles.exDur}>{ex.duration}s</span>
+                  <span style={styles.exDur}>{isReps ? `${ex.reps} reps` : `${ex.duration}s`}</span>
                 </div>
                 {infoUid === ex.uid && <div style={styles.descBox}>{ex.desc}</div>}
               </React.Fragment>
@@ -940,7 +1039,36 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
           </div>
           <h1 style={styles.setupTitle}>Edit workout</h1>
           <div style={styles.previewMeta}>
-            Hold ⠿ and drag to reorder · − / + to adjust time · tap × to remove
+            Hold ⠿ and drag to reorder · − / + to adjust {isReps ? "reps" : "time"} · tap × to
+            remove
+          </div>
+
+          <div style={styles.sectionLabel}>EACH EXERCISE IS</div>
+          <div style={styles.modeToggle} role="radiogroup" aria-label="Workout mode">
+            {[
+              { key: "time", label: "Timed", hint: "Counts down on its own" },
+              { key: "reps", label: "Reps", hint: "Tap the screen when done" },
+            ].map((m) => (
+              <button
+                key={m.key}
+                onClick={() => {
+                  if (mode === m.key) return;
+                  setMode(m.key);
+                  setEdited(true);
+                }}
+                role="radio"
+                aria-checked={mode === m.key}
+                style={{
+                  ...styles.modeBtn,
+                  borderColor: mode === m.key ? "#5B8DEF" : "#3B4A63",
+                  background: mode === m.key ? "#1A2740" : "transparent",
+                  color: mode === m.key ? "#fff" : "#8FA3BF",
+                }}
+              >
+                <span style={styles.modeBtnLabel}>{m.label}</span>
+                <span style={styles.modeBtnHint}>{m.hint}</span>
+              </button>
+            ))}
           </div>
 
           <div style={styles.sectionLabel}>EXERCISES</div>
@@ -981,19 +1109,21 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
                   </div>
                   <span style={styles.exName}>{ex.name}</span>
                   <button
-                    onClick={() => changeDuration(ex.uid, -5)}
+                    onClick={() =>
+                      isReps ? changeReps(ex.uid, -1) : changeDuration(ex.uid, -5)
+                    }
                     style={styles.durBtn}
-                    aria-label={`Decrease ${ex.name} time`}
+                    aria-label={`Decrease ${ex.name} ${isReps ? "reps" : "time"}`}
                   >
                     −
                   </button>
-                  <span style={{ ...styles.exDur, minWidth: 36, textAlign: "center" }}>
-                    {ex.duration}s
+                  <span style={{ ...styles.exDur, minWidth: 52, textAlign: "center" }}>
+                    {isReps ? `${ex.reps} reps` : `${ex.duration}s`}
                   </span>
                   <button
-                    onClick={() => changeDuration(ex.uid, 5)}
+                    onClick={() => (isReps ? changeReps(ex.uid, 1) : changeDuration(ex.uid, 5))}
                     style={styles.durBtn}
-                    aria-label={`Increase ${ex.name} time`}
+                    aria-label={`Increase ${ex.name} ${isReps ? "reps" : "time"}`}
                   >
                     +
                   </button>
@@ -1057,7 +1187,9 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
                           {ex.group} · {ex.cue}
                         </div>
                       </div>
-                      <span style={styles.resultDur}>{ex.duration}s</span>
+                      <span style={styles.resultDur}>
+                        {isReps ? `${DEFAULT_REPS} reps` : `${ex.duration}s`}
+                      </span>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -1162,7 +1294,7 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
             disabled={exercises.length === 0}
             style={{ ...styles.startBtn, opacity: exercises.length === 0 ? 0.4 : 1 }}
           >
-            DONE · ~{totalMins} MIN
+            {isReps ? "DONE" : `DONE · ~${totalMins} MIN`}
           </button>
         </div>
       </div>
@@ -1178,7 +1310,7 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
           <h1 style={styles.doneTitle}>Workout complete</h1>
           <p style={styles.doneSub}>
             {selectedName} · {totalRounds} rounds · {totalRounds * exercises.length} sets · ~
-            {totalMins} min
+            {doneMins} min
           </p>
           <button
             onClick={() => {
@@ -1220,7 +1352,24 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
         </button>
       </div>
 
-      <div style={styles.centerBlock}>
+      {/* An open rep set ends on a tap, so the whole middle of the screen is
+          the button — a target you can hit without looking mid-set. */}
+      <div
+        style={{ ...styles.centerBlock, cursor: openSet && running ? "pointer" : "default" }}
+        onClick={openSet && running ? finishSet : undefined}
+        onKeyDown={
+          openSet && running
+            ? (e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
+                finishSet();
+              }
+            : undefined
+        }
+        role={openSet && running ? "button" : undefined}
+        tabIndex={openSet && running ? 0 : undefined}
+        aria-label={openSet && running ? "Set done — start the rest" : undefined}
+      >
         <div style={styles.exerciseName}>
           {phase === "work" ? currentEx.name : phase === "ready" ? "Get in position" : "Breathe"}
         </div>
@@ -1228,17 +1377,29 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
           <div style={{ ...styles.cue, color: theme.accent }}>{currentEx.cue}</div>
         )}
 
-        <div style={styles.bigTime}>{fmt(timeLeft)}</div>
+        {openSet ? (
+          <React.Fragment>
+            <div style={styles.bigTime}>{currentEx.reps}</div>
+            <div style={{ ...styles.repsUnit, color: theme.accent }}>
+              REPS · {fmt(setElapsed)} ELAPSED
+            </div>
+            <div style={styles.tapPrompt}>{running ? "TAP ANYWHERE WHEN DONE" : "PAUSED"}</div>
+          </React.Fragment>
+        ) : (
+          <React.Fragment>
+            <div style={styles.bigTime}>{fmt(timeLeft)}</div>
 
-        <div style={styles.progressTrack}>
-          <div
-            style={{
-              ...styles.progressFill,
-              width: `${progress * 100}%`,
-              background: theme.accent,
-            }}
-          />
-        </div>
+            <div style={styles.progressTrack}>
+              <div
+                style={{
+                  ...styles.progressFill,
+                  width: `${progress * 100}%`,
+                  background: theme.accent,
+                }}
+              />
+            </div>
+          </React.Fragment>
+        )}
 
         <div style={styles.dots}>
           {exercises.map((ex, i) => (
@@ -1257,7 +1418,7 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
 
         {nextEx && (
           <div style={{ ...styles.upNext, color: theme.accent }}>
-            UP NEXT — {nextEx.name} · {nextEx.duration}s
+            UP NEXT — {nextEx.name} · {isReps ? `${nextEx.reps} reps` : `${nextEx.duration}s`}
           </div>
         )}
       </div>
@@ -1266,11 +1427,14 @@ function WorkoutTimer({ onHome, user, authReady, onSyncState }) {
         <button onClick={running ? goBack : reset} style={styles.ctrlBtnSecondary}>
           {running ? "Back" : "Reset"}
         </button>
-        <button onClick={togglePause} style={styles.ctrlBtnPrimary}>
-          {running ? "Pause" : "Resume"}
+        <button
+          onClick={openSet && running ? finishSet : togglePause}
+          style={styles.ctrlBtnPrimary}
+        >
+          {openSet && running ? "Set done" : running ? "Pause" : "Resume"}
         </button>
-        <button onClick={skip} style={styles.ctrlBtnSecondary}>
-          Skip
+        <button onClick={openSet && running ? togglePause : skip} style={styles.ctrlBtnSecondary}>
+          {openSet && running ? "Pause" : "Skip"}
         </button>
       </div>
     </div>

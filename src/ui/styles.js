@@ -76,6 +76,8 @@ const styles = {
     alignItems: "center",
     gap: 8,
   },
+  // A card can carry both badges at once, so neither may absorb the squeeze
+  // when a long preset name shares the row with them.
   customBadge: {
     fontSize: 10,
     fontWeight: 800,
@@ -84,6 +86,19 @@ const styles = {
     border: "1px solid #6EE7B7",
     borderRadius: 6,
     padding: "2px 6px",
+    flexShrink: 0,
+    whiteSpace: "nowrap",
+  },
+  repsBadge: {
+    fontSize: 10,
+    fontWeight: 800,
+    letterSpacing: "0.1em",
+    color: "#FDE68A",
+    border: "1px solid #FDE68A",
+    borderRadius: 6,
+    padding: "2px 6px",
+    flexShrink: 0,
+    whiteSpace: "nowrap",
   },
   presetCardMeta: { fontSize: 13, color: "#8FA3BF", fontWeight: 500 },
   presetArrow: { fontSize: 28, color: "#5B8DEF", fontWeight: 400 },
@@ -417,6 +432,22 @@ const styles = {
     fontWeight: 700,
     margin: "24px 0 10px",
   },
+  // ---- Timed / reps mode picker (edit screen) ----
+  modeToggle: { display: "flex", gap: 10 },
+  modeBtn: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    gap: 3,
+    padding: "12px 10px",
+    borderRadius: 12,
+    border: "2px solid #3B4A63",
+    fontFamily: "inherit",
+    textAlign: "left",
+    cursor: "pointer",
+  },
+  modeBtnLabel: { fontSize: 15, fontWeight: 800 },
+  modeBtnHint: { fontSize: 11.5, fontWeight: 600, color: "#8FA3BF", lineHeight: 1.3 },
   exList: { borderTop: "1px solid #26324A" },
   exRow: {
     display: "flex",
@@ -618,6 +649,18 @@ const styles = {
     fontVariantNumeric: "tabular-nums",
     letterSpacing: "-0.03em",
     margin: "16px 0 24px",
+  },
+  // ---- Open rep set (the tap-to-continue screen) ----
+  repsUnit: { fontSize: 15, fontWeight: 800, letterSpacing: "0.2em", marginTop: -12 },
+  tapPrompt: {
+    marginTop: 20,
+    padding: "12px 22px",
+    borderRadius: 999,
+    border: "2px dashed rgba(255,255,255,0.45)",
+    fontSize: 13,
+    fontWeight: 800,
+    letterSpacing: "0.15em",
+    color: "rgba(255,255,255,0.9)",
   },
   progressTrack: {
     width: "100%",

@@ -1,13 +1,23 @@
 // Exercise catalog, built-in presets, and the workout-entry data model.
 //
-// Everything here is something you can hold or repeat for a stretch of time,
-// since the timer counts seconds rather than reps. `group` is what the edit
-// screen browses by; `alt` holds extra keywords the search should also match.
+// Everything here is something you can hold or repeat for a stretch of time.
+// `duration` is the library default for a timed workout; a reps workout counts
+// repetitions instead and ends each set on a tap, so `duration` is simply
+// unused there. `group` is what the edit screen browses by; `alt` holds extra
+// keywords the search should also match.
 //
-// A preset entry is either a plain library id or { id, duration } when the
-// duration was customized away from the library default; withUids() wraps
+// A preset entry is either a plain library id or { id, duration?, reps? }
+// carrying whatever was customized away from the defaults. Both values are
+// kept even when only one mode is in use, so flipping a preset between timed
+// and reps and back doesn't discard the other side's numbers. withUids() wraps
 // those into the editable workout state.
 const GROUPS = ["Core", "Upper Body", "Lower Body", "Full Body", "Cardio", "Mobility"];
+
+// Reps are a per-workout choice rather than a property of the catalog: the same
+// exercise is a 45-second hold in one preset and a 12-rep set in another. One
+// default for everything keeps the catalog honest — the editor is where a rep
+// count gets set to something the exercise actually deserves.
+const DEFAULT_REPS = 12;
 
 // Words people search that mean a whole category — "abs" should surface the
 // core work even though no exercise is called that. Folded into each
@@ -226,17 +236,23 @@ const LIBRARY = [
 ];
 const byId = (id) => LIBRARY.find((e) => e.id === id);
 
-// Preset exercise entries are either a plain id string or { id, duration }
-// when the duration was customized away from the library default.
+// Preset exercise entries are either a plain id string or an object carrying
+// the values customized away from the library defaults.
 const resolveEntry = (entry) => {
   const ex = byId(typeof entry === "string" ? entry : entry.id);
   if (!ex) return null;
-  return typeof entry === "string" || entry.duration == null
-    ? ex
-    : { ...ex, duration: entry.duration };
+  if (typeof entry === "string") return { ...ex, reps: DEFAULT_REPS };
+  return {
+    ...ex,
+    duration: entry.duration != null ? entry.duration : ex.duration,
+    reps: entry.reps != null ? entry.reps : DEFAULT_REPS,
+  };
 };
 
 // ---- Built-in presets ----
+// `mode` is "time" (each exercise runs for its duration) or "reps" (each
+// exercise is a rep target that ends when you tap). Absent means "time", so
+// every preset saved before reps mode existed still reads correctly.
 const BUILTIN_PRESETS = [
   {
     id: "classic",
@@ -271,6 +287,21 @@ const BUILTIN_PRESETS = [
     rounds: 3,
   },
   {
+    id: "repscircuit",
+    name: "Reps Circuit",
+    mode: "reps",
+    exercises: [
+      { id: "pushup", reps: 12 },
+      { id: "squat", reps: 15 },
+      { id: "lunges", reps: 20 },
+      { id: "chairdip", reps: 12 },
+      { id: "crunches", reps: 20 },
+    ],
+    rest: 30,
+    roundRest: 90,
+    rounds: 3,
+  },
+  {
     id: "mobility",
     name: "Mobility Flow",
     exercises: [
@@ -293,5 +324,5 @@ const withUids = (entries) =>
   entries.map((e) =>
     typeof e === "string"
       ? { uid: `u${uidCounter++}`, exId: e }
-      : { uid: `u${uidCounter++}`, exId: e.id, duration: e.duration }
+      : { uid: `u${uidCounter++}`, exId: e.id, duration: e.duration, reps: e.reps }
   );
